@@ -1,66 +1,125 @@
-"""
-This module defines the StateGraph for the Financial Research AI Agent.
-It orchestrates the flow between the Manager, Researchers (Tavily, YFinance, TradingView),
-Analyst, and Reporter agents.
-"""
+# src/graph.py
+"""12-node stub topology for FinResearchAI. Nodes return contract-shaped stub data.
+Real implementations are provided by the work-package plans; this file only freezes
+the graph wiring and the state contract."""
+from __future__ import annotations
 
-from langgraph.graph import StateGraph, END
-from .state import AgentState
-from .agents.manager import manager_node
-from .agents.researchers.tavily import tavily_node
-from .agents.researchers.yfinance_agent import yfinance_node
-from .agents.researchers.tradingview import tradingview_node
-from .agents.analyst import analyst_node
-from .agents.reporter import reporter_node
+from langgraph.graph import END, START, StateGraph
+
+from src.state import AgentState
 
 
-def route_research(state: AgentState):
-    """
-    Determines the next step based on the Manager's decision.
-    Routes to selected researchers or skips directly to Analyst if cache is valid.
-    """
-    agents = state.get("agents_to_run", [])
-    if not agents:
-        return ["analyst"]
-
-    # LangGraph conditional edge with a list of strings will trigger parallel nodes
-    # if those nodes are defined in the mapping.
-    return agents
+def _metric(node: str) -> list[dict]:
+    return [{"node": node, "prompt_tokens": 0, "completion_tokens": 0, "latency_s": 0.0, "cost_usd": 0.0}]
 
 
-def create_graph():
-    """
-    Constructs and compiles the StateGraph workflow.
-    """
+def router(state: AgentState) -> dict:
+    return {
+        "resolved_ticker": state.get("ticker", ""),
+        "screener": "america",
+        "exchange": "NASDAQ",
+        "model_plan": {"analysts": "quick", "debate": "deep", "verdict": "deep"},
+        "run_metrics": _metric("router"),
+    }
 
-    workflow = StateGraph(AgentState)
 
-    # Nodes
-    workflow.add_node("manager", manager_node)
-    workflow.add_node("tavily_researcher", tavily_node)
-    workflow.add_node("yfinance_researcher", yfinance_node)
-    workflow.add_node("tradingview_researcher", tradingview_node)
-    workflow.add_node("analyst", analyst_node)
-    workflow.add_node("reporter", reporter_node)
+def _analyst(name: str):
+    def node(state: AgentState) -> dict:
+        return {
+            "analyst_reports": {name: {"summary": f"stub {name} report", "confidence": 0.5}},
+            "run_metrics": _metric(f"{name}_analyst"),
+        }
+    return node
 
-    # Edges
-    workflow.set_entry_point("manager")
 
-    workflow.add_conditional_edges(
-        "manager",
-        route_research,
-        {
-            "tavily_researcher": "tavily_researcher",
-            "yfinance_researcher": "yfinance_researcher",
-            "tradingview_researcher": "tradingview_researcher",
-            "analyst": "analyst",
+def bull(state: AgentState) -> dict:
+    return {"research_debate": {"bull_thesis": "stub bull"}, "run_metrics": _metric("bull")}
+
+
+def bear(state: AgentState) -> dict:
+    return {"research_debate": {"bear_thesis": "stub bear"}, "run_metrics": _metric("bear")}
+
+
+def facilitator(state: AgentState) -> dict:
+    return {"research_debate": {"facilitator_verdict": "stub lean-neutral"}, "run_metrics": _metric("facilitator")}
+
+
+def trader(state: AgentState) -> dict:
+    return {
+        "trade_proposal": {"action": "HOLD", "conviction": 0.5, "score": 50, "rationale": "stub"},
+        "run_metrics": _metric("trader"),
+    }
+
+
+def risk_conservative(state: AgentState) -> dict:
+    return {"risk_debate": {"conservative": "stub careful"}, "run_metrics": _metric("risk_conservative")}
+
+
+def risk_aggressive(state: AgentState) -> dict:
+    return {"risk_debate": {"aggressive": "stub bold"}, "run_metrics": _metric("risk_aggressive")}
+
+
+def risk_arbiter(state: AgentState) -> dict:
+    proposal = state.get("trade_proposal", {})
+    return {
+        "final_decision": {
+            "action": proposal.get("action", "HOLD"),
+            "conviction": proposal.get("conviction", 0.5),
+            "score": proposal.get("score", 50),
+            "rationale": "stub arbiter decision",
         },
-    )
+        "run_metrics": _metric("risk_arbiter"),
+    }
 
-    workflow.add_edge("tavily_researcher", "analyst")
-    workflow.add_edge("yfinance_researcher", "analyst")
-    workflow.add_edge("tradingview_researcher", "analyst")
-    workflow.add_edge("analyst", "reporter")
-    workflow.add_edge("reporter", END)
 
-    return workflow.compile()
+def reporter(state: AgentState) -> dict:
+    return {"final_report": "# Stub Report\n\nReplace in WP-F.", "run_metrics": _metric("reporter")}
+
+
+_ANALYSTS = ["news", "fundamentals", "technicals"]
+
+
+def build_graph():
+    g = StateGraph(AgentState)
+
+    g.add_node("router", router)
+    for name in _ANALYSTS:
+        g.add_node(f"{name}_analyst", _analyst(name))
+    g.add_node("bull", bull)
+    g.add_node("bear", bear)
+    g.add_node("facilitator", facilitator)
+    g.add_node("trader", trader)
+    g.add_node("risk_conservative", risk_conservative)
+    g.add_node("risk_aggressive", risk_aggressive)
+    g.add_node("risk_arbiter", risk_arbiter)
+    g.add_node("reporter", reporter)
+
+    g.add_edge(START, "router")
+
+    # Router fans out to the three analysts (parallel).
+    for name in _ANALYSTS:
+        g.add_edge("router", f"{name}_analyst")
+
+    # All analysts must finish before the bull/bear debate (join via multiple in-edges).
+    for name in _ANALYSTS:
+        g.add_edge(f"{name}_analyst", "bull")
+        g.add_edge(f"{name}_analyst", "bear")
+
+    # Bull + bear both feed the facilitator (join).
+    g.add_edge("bull", "facilitator")
+    g.add_edge("bear", "facilitator")
+
+    g.add_edge("facilitator", "trader")
+
+    # Trader fans out to the two risk personas.
+    g.add_edge("trader", "risk_conservative")
+    g.add_edge("trader", "risk_aggressive")
+
+    # Both risk personas feed the arbiter (join).
+    g.add_edge("risk_conservative", "risk_arbiter")
+    g.add_edge("risk_aggressive", "risk_arbiter")
+
+    g.add_edge("risk_arbiter", "reporter")
+    g.add_edge("reporter", END)
+
+    return g.compile()
