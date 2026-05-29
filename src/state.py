@@ -1,37 +1,38 @@
-"""
-This module defines the AgentState TypedDict, which serves as the shared memory
-structure passed between nodes in the LangGraph workflow.
-"""
+# src/state.py
+from __future__ import annotations
 
-from typing import TypedDict, Annotated, List
 import operator
-from langchain_core.messages import BaseMessage
+from typing import Annotated, Any, TypedDict
 
 
-class AgentState(TypedDict):
-    """
-    Shared state for the FinResearch AI graph.
-    Attributes:
-        messages: History of messages (not heavily used in this specific flow but standard for LangGraph).
-        ticker: The stock ticker symbol being analyzed.
-        dataset: (Optional) Intermediate data store.
-        research_summary: Aggregated text from researchers.
-        financial_data: Structured JSON data (Chart, Metrics) from Reporter.
-        analyst_verdict: Structured judgment (Score, Rec, Reason) from Analyst.
-        final_report: The final markdown report.
-        investor_mode: User preference (Bullish/Bearish/Neutral).
-        agents_to_run: List of agents selected by Manager.
-    """
+def merge_named_reports(left: dict | None, right: dict | None) -> dict:
+    """Reducer for parallel analyst writes: shallow-merge by analyst name (right wins)."""
+    out: dict[str, Any] = dict(left or {})
+    out.update(right or {})
+    return out
 
-    messages: Annotated[List[BaseMessage], operator.add]
+
+class AgentState(TypedDict, total=False):
+    # --- control (Router) ---
     ticker: str
     resolved_ticker: str
     screener: str
     exchange: str
-    research_summary: str
-    financial_data: dict
-    analyst_verdict: dict
-    final_report: str
     investor_mode: str
-    next_step: str
-    agents_to_run: List[str]
+    model_plan: dict
+
+    # --- research (analysts write concurrently; merged by name) ---
+    analyst_reports: Annotated[dict, merge_named_reports]
+
+    # --- debate + decision (concurrent writers; merged by key) ---
+    research_debate: Annotated[dict, merge_named_reports]
+    risk_debate: Annotated[dict, merge_named_reports]
+
+    # --- single-writer fields ---
+    trade_proposal: dict
+    final_decision: dict
+    final_report: str
+
+    # --- observability (accumulated across nodes) ---
+    run_metrics: Annotated[list, operator.add]
+    run_id: str
