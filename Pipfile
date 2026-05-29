@@ -1,0 +1,28 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+langchain = "*"
+langchain-community = "*"
+langchain-openai = "*"
+langchain-pinecone = "*"
+langchain-tavily = "*"
+langgraph = "*"
+pinecone-client = "*"
+tavily-python = "*"
+yfinance = "*"
+pydantic = "*"
+python-dotenv = "*"
+pytest = "*"
+pytest-asyncio = "*"
+gradio = "*"
+tradingview-ta = "*"
+pandas = "*"
+plotly = "*"
+
+[dev-packages]
+
+[requires]
+python_version = "3.11"

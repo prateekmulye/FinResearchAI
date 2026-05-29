@@ -1,0 +1,13 @@
+langgraph
+langchain-openai
+langchain-core
+langchain-community
+langchain-pinecone
+langchain-tavily
+pinecone-client
+gradio
+pandas
+yfinance
+tradingview-ta
+python-dotenv
+plotly>=5.0.0
