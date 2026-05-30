@@ -29,9 +29,18 @@ api = [
 dev = [
     "pytest==8.4.2",
     "pytest-asyncio>=0.24",
+    "pytest-cov>=5.0",
     "respx>=0.21",
     "ruff>=0.6",
     "mypy>=1.11",
+]
+# Aggregate group CI installs so lint/type-check/tests see every import path.
+all = [
+    "finresearchai[memory]",
+    "finresearchai[web]",
+    "finresearchai[data]",
+    "finresearchai[api]",
+    "finresearchai[dev]",
 ]
 
 [build-system]
@@ -45,12 +54,44 @@ namespaces = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-v --ignore=tests/test_flow.py --ignore=tests/test_international.py --ignore=tests/test_ui_logic.py"
+# Deselect the live (network) test by default; CI and local runs stay offline.
+# --strict-markers turns any unregistered marker into an error (catches typos).
+addopts = "-v -m \"not live\" --strict-markers"
 asyncio_mode = "auto"
 markers = [
-    "live: hits a real external API; skipped unless RUN_LIVE=1",
+    "live: hits a real external API; skipped unless RUN_LIVE=1 (deselect with '-m \"not live\"')",
 ]
 
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+follow_imports = "silent"
+warn_unused_ignores = false
+disallow_untyped_defs = false
+check_untyped_defs = false
+# `src` is a namespace package (no src/__init__.py). Treat the repo root as the
+# package base so `mypy src` names modules consistently (src.agents.*) and does not
+# discover the same file twice under both "agents.*" and "src.agents.*".
+namespace_packages = true
+explicit_package_bases = true
+mypy_path = "."
+# Lenient: we type-check that imports RESOLVE and catch obvious mistakes, not strict
+# typing. These codes are disabled because the shared structured-output convention
+# (`llm.with_structured_output(Schema, method=STRUCT_METHOD)` where STRUCT_METHOD is a
+# plain str, and `result: Schema = await llm.ainvoke(...)` where LangChain's runtime
+# return is dynamically typed) trips arg-type/assignment/operator across every node —
+# these are false positives for our purposes, not real defects.
+disable_error_code = ["arg-type", "assignment", "operator", "import-untyped"]
+
+[tool.coverage.run]
+source = ["src"]
+omit = ["tests/*"]
+
+[tool.coverage.report]
+# Coverage threshold is OPT-IN: enable by running `pytest --cov=src --cov-fail-under=60`.
+# Not enforced by default CI to avoid blocking on integration-test coverage gaps.
+show_missing = true

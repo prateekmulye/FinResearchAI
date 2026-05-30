@@ -2,7 +2,6 @@
 .ipynb_checkpoints
 .DS_Store
 .env
-.github
 
 # Byte-compiled / optimized / DLL files
 __pycache__

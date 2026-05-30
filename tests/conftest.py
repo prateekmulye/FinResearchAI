@@ -10,11 +10,14 @@ order and fires LangChain callbacks so CostTracker records one entry per call.
 from __future__ import annotations
 
 import importlib
+import sys
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
+from src.config import settings as settings_mod
+from src.llm import factory as factory_mod
 from src.llm.schemas import AnalystReport, DebateTurn, FinalDecision, RiskStance, TradeProposal
 from src.agents.reporter import ReportPayload
 
@@ -253,3 +256,177 @@ def offline_graph(monkeypatch):
     """Fixture: patch all node LLMs + tools so the compiled graph runs offline."""
     _install_offline_graph(monkeypatch)
     return monkeypatch
+
+
+# ---------------------------------------------------------------------------
+# WP-I shared fixtures — added ADDITIVELY (existing fixtures above untouched).
+#
+# - env_isolation (autouse): scrub provider keys + force RUN_LIVE off so no test
+#   accidentally hits the network or reads a real .env.
+# - fake_llm: schema-routed factory that patches src.llm.factory.get_llm (and the
+#   get_llm name re-imported into already-loaded src.* node modules) to return a
+#   fake whose .with_structured_output(Schema).ainvoke(...) yields a supplied
+#   Pydantic instance.
+# - frozen_state: builder producing a fully-populated AgentState dict.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def env_isolation(monkeypatch):
+    """Clear provider keys and the live switch; clear cached singletons.
+
+    Runs for EVERY test (autouse). Ensures unit/integration tests never read a
+    real .env or reach a live provider, and that get_settings()/get_llm() caches
+    don't leak a real key between tests.
+    """
+    for key in ("OLLAMA_API_KEY", "FIRECRAWL_API_KEY", "LLM_BASE_URL", "LANGSMITH_API_KEY"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("RUN_LIVE", "0")
+    # Construct Settings without reading the on-disk .env in tests.
+    monkeypatch.setattr(
+        settings_mod.Settings,
+        "model_config",
+        {**settings_mod.Settings.model_config, "env_file": None},
+        raising=False,
+    )
+    _clear_caches()
+    yield
+    _clear_caches()
+
+
+def _clear_caches() -> None:
+    """Clear the settings + factory lru_caches if they are still the cached funcs.
+
+    Guarded with ``hasattr`` because a test may have monkeypatched ``get_llm`` /
+    ``get_settings`` to a plain callable that lacks ``cache_clear``.
+    """
+    if hasattr(settings_mod.get_settings, "cache_clear"):
+        settings_mod.get_settings.cache_clear()
+    if hasattr(factory_mod.get_llm, "cache_clear"):
+        factory_mod.get_llm.cache_clear()
+
+
+class _WPIFakeStructured:
+    """Stand-in for llm.with_structured_output(Schema): its ainvoke returns a fixed instance."""
+
+    def __init__(self, instance: Any) -> None:
+        self._instance = instance
+
+    async def ainvoke(self, *args, **kwargs) -> Any:
+        return self._instance
+
+    def invoke(self, *args, **kwargs) -> Any:
+        return self._instance
+
+
+class _WPIFakeLLM:
+    """Stand-in for a ChatOpenAI. with_structured_output(Schema) -> _WPIFakeStructured.
+
+    ``mapping`` is either a single Pydantic instance (returned for any schema) or a
+    dict {SchemaClass: instance} routed by the schema passed to with_structured_output.
+    """
+
+    def __init__(self, mapping: Any) -> None:
+        self._mapping = mapping
+
+    def with_structured_output(self, schema=None, **kwargs) -> _WPIFakeStructured:
+        if isinstance(self._mapping, dict):
+            if schema not in self._mapping:
+                raise KeyError(
+                    f"fake_llm has no registered instance for schema {schema!r}; "
+                    f"registered: {list(self._mapping)}"
+                )
+            return _WPIFakeStructured(self._mapping[schema])
+        return _WPIFakeStructured(self._mapping)
+
+    async def ainvoke(self, *args, **kwargs) -> Any:
+        # For nodes that call the raw LLM without structured output.
+        if isinstance(self._mapping, dict):
+            return next(iter(self._mapping.values()))
+        return self._mapping
+
+
+@pytest.fixture
+def fake_llm(monkeypatch):
+    """Factory fixture. Call ``fake_llm(instance)`` or ``fake_llm({Schema: instance, ...})``.
+
+    Patches ``src.llm.factory.get_llm`` AND the ``get_llm`` name as re-imported
+    into every already-loaded ``src.`` module (nodes do ``from src.llm.factory
+    import get_llm``), so every tier returns the same fake. Returns the configured
+    fake in case the test wants to inspect it.
+    """
+
+    # The real factory function as currently bound; we patch every module whose
+    # `get_llm` IS this exact object (covers `from src.llm.factory import get_llm`
+    # re-imports in node modules AND in test modules) — precise, won't clobber
+    # unrelated `get_llm` names.
+    _real_get_llm = factory_mod.get_llm
+
+    def _install(mapping: Any) -> _WPIFakeLLM:
+        fake = _WPIFakeLLM(mapping)
+        _fake_get_llm = lambda tier=None: fake  # noqa: E731 - tiny stand-in
+        monkeypatch.setattr(factory_mod, "get_llm", _fake_get_llm)
+        for mod in list(sys.modules.values()):
+            if mod is None or mod is factory_mod:
+                continue
+            if getattr(mod, "get_llm", None) is _real_get_llm:
+                monkeypatch.setattr(mod, "get_llm", _fake_get_llm)
+        return fake
+
+    return _install
+
+
+@pytest.fixture
+def frozen_state():
+    """Builder fixture: returns a callable producing a fully-populated AgentState dict.
+
+    Defaults model a completed run for 'AAPL'; pass overrides to vary fields.
+    """
+
+    def _build(**overrides: Any) -> dict:
+        state: dict[str, Any] = {
+            "ticker": "AAPL",
+            "resolved_ticker": "AAPL",
+            "screener": "america",
+            "exchange": "NASDAQ",
+            "investor_mode": "Neutral",
+            "model_plan": {"analysts": "quick", "debate": "deep", "verdict": "deep"},
+            "analyst_reports": {
+                "news": {
+                    "summary": "news ok", "key_points": ["a"],
+                    "confidence": 0.6, "citations": ["http://x"],
+                },
+                "fundamentals": {
+                    "summary": "fundies ok", "key_points": ["b"],
+                    "confidence": 0.7, "citations": [],
+                },
+                "technicals": {
+                    "summary": "tech ok", "key_points": ["c"],
+                    "confidence": 0.5, "citations": [],
+                },
+            },
+            "research_debate": {
+                "bull_thesis": "upside",
+                "bear_thesis": "downside",
+                "facilitator_verdict": "lean neutral",
+            },
+            "trade_proposal": {
+                "action": "HOLD", "conviction": 0.5, "score": 50, "rationale": "mixed",
+            },
+            "risk_debate": {
+                "conservative": "be careful",
+                "aggressive": "be bold",
+                "arbiter_decision": "hold",
+                "adjustments": [],
+            },
+            "final_decision": {
+                "action": "HOLD", "conviction": 0.5, "score": 50, "rationale": "final",
+            },
+            "final_report": "# AAPL Report\n\nStub body.",
+            "run_metrics": [],
+            "run_id": "test-run-0001",
+        }
+        state.update(overrides)
+        return state
+
+    return _build
