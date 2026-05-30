@@ -96,13 +96,16 @@ def test_default_store_is_constructed_lazily(monkeypatch):
     built = {}
 
     class SpyStore(FakeStore):
-        def __init__(self):
+        def __init__(self, **kwargs):
             super().__init__()
+            built["kwargs"] = kwargs
             built["yes"] = True
 
     monkeypatch.setattr(cache_mod, "VectorStore", SpyStore)
     store_verdict("NVDA", _decision(), now=7)  # no store= kwarg
     assert built.get("yes") is True
+    # cache pins the collection explicitly (no reliance on the store's default).
+    assert built["kwargs"].get("collection") == "verdicts"
 
 
 def test_cache_end_to_end_against_real_chroma(tmp_path):

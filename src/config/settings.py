@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     # Debate
     research_debate_rounds: int = 1
     risk_debate_rounds: int = 1
-    debate_mode: str = "on"  # "on" | "off"
+    debate_mode: Literal["on", "off"] = "on"
 
     # Memory
     chroma_dir: str = ".chroma"

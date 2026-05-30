@@ -68,11 +68,21 @@ async def router(state: dict) -> dict:
         SystemMessage(content=_SYSTEM),
         HumanMessage(content=f"Resolve this symbol or company: {raw_ticker!r}"),
     ]
-    resolution: TickerResolution = await llm.ainvoke(messages, config={"callbacks": [tracker]})
+    try:
+        resolution: TickerResolution = await llm.ainvoke(
+            messages, config={"callbacks": [tracker]}
+        )
+    except Exception as exc:
+        # The router is the entry node: an unhandled failure would abort the whole
+        # graph. Degrade to a US-default resolution so the pipeline still runs.
+        _LOG.warning("router: LLM resolution failed (%s); degrading to raw ticker", exc)
+        resolution = TickerResolution(
+            resolved_ticker=raw_ticker or "UNKNOWN", screener="america", exchange="NASDAQ"
+        )
 
     per_node = tracker.totals()["per_node"]
     # Guarantee at least one metrics record (tracker is empty when LLM call was
-    # a no-op in unit tests or when structured-output bypasses callbacks).
+    # a no-op in unit tests, degraded above, or when structured-output bypasses callbacks).
     if not per_node:
         per_node = zero_metrics("router")
 

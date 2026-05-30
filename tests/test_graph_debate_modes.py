@@ -124,8 +124,7 @@ def _patch_risk_nodes(monkeypatch):
     import src.agents.risk.conservative as cons_mod
     import src.agents.risk.aggressive as agg_mod
     import src.agents.risk.arbiter as arbiter_mod
-    from src.llm.schemas import TradeProposal, FinalDecision
-    from src.agents.risk.conservative import RiskStance
+    from src.llm.schemas import TradeProposal, FinalDecision, RiskStance
 
     _trade_proposal = TradeProposal(action="BUY", conviction=0.7, score=70, rationale="stub trade")
     _final_decision = FinalDecision(action="BUY", conviction=0.7, score=70, rationale="stub decision")
@@ -328,6 +327,18 @@ async def test_debate_mode_off_produces_verdict_only(monkeypatch):
     assert rd["facilitator_verdict"] == "single-pass lean HOLD"
     assert rd.get("bull_thesis", "") == ""
     assert rd.get("bear_thesis", "") == ""
+
+    # COORDINATION §7.4: in "off" mode the 10 graph nodes must each emit a metric
+    # line (reporter is unpatched here, so it degrades — proving every node, even a
+    # degraded one, still contributes its per-node record). Debate sub-calls add
+    # extra "risk_debate" records, so assert label COVERAGE, not an exact count.
+    emitted = {m["node"] for m in result["run_metrics"]}
+    expected_nodes = {
+        "router", "news_analyst", "fundamentals_analyst", "technicals_analyst",
+        "research_synthesis", "trader", "risk_conservative", "risk_aggressive",
+        "risk_arbiter", "reporter",
+    }
+    assert expected_nodes <= emitted, f"off-mode missing metric lines: {expected_nodes - emitted}"
 
 
 def test_debate_mode_off_does_not_register_debate_nodes():

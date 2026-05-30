@@ -5,13 +5,17 @@ reducer combines it with the bear's parallel write safely."""
 from __future__ import annotations
 
 import json
+import logging
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from src.agents._metrics import zero_metrics
 from src.llm.cost import CostTracker
 from src.llm.factory import STRUCT_METHOD, get_llm
 from src.llm.schemas import DebateTurn
 from src.state import AgentState
+
+_LOG = logging.getLogger(__name__)
 
 BULL_SYSTEM = (
     "You are the BULL researcher on an equity research desk. Build the strongest "
@@ -34,8 +38,13 @@ async def bull(state: AgentState) -> dict:
         "State your bullish thesis. Set role='bull' and round=1."
     )
     messages = [SystemMessage(content=BULL_SYSTEM), HumanMessage(content=human)]
-    turn: DebateTurn = await llm.ainvoke(messages, config={"callbacks": [tracker]})
+    try:
+        turn: DebateTurn = await llm.ainvoke(messages, config={"callbacks": [tracker]})
+        thesis = turn.argument
+    except Exception as exc:
+        _LOG.warning("bull: LLM call failed (%s); degrading to empty thesis", exc)
+        thesis = ""
     return {
-        "research_debate": {"bull_thesis": turn.argument},
-        "run_metrics": tracker.totals()["per_node"],
+        "research_debate": {"bull_thesis": thesis},
+        "run_metrics": tracker.totals()["per_node"] or zero_metrics("bull"),
     }

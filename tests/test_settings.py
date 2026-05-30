@@ -18,6 +18,31 @@ def test_load_model_tiers_reads_yaml(tmp_path):
     assert tiers["deep"]["temperature"] == 0.9
 
 
+# COORDINATION §1 frozen Settings fields. A rename/removal here is a coordination
+# event that breaks downstream WPs, so assert the full set explicitly.
+_CONTRACT_FIELDS = {
+    "llm_provider", "llm_base_url", "ollama_api_key", "firecrawl_api_key",
+    "quick_model", "deep_model", "quick_temperature", "deep_temperature",
+    "research_debate_rounds", "risk_debate_rounds", "debate_mode",
+    "chroma_dir", "embedding_model", "runs_dir", "langsmith_enabled",
+}
+
+
+def test_settings_exposes_all_contract_fields(monkeypatch):
+    for k in ("OLLAMA_API_KEY", "FIRECRAWL_API_KEY", "QUICK_MODEL", "DEEP_MODEL"):
+        monkeypatch.delenv(k, raising=False)
+    s = Settings(_env_file=None)
+    missing = _CONTRACT_FIELDS - set(type(s).model_fields)
+    assert not missing, f"Settings dropped frozen contract fields: {missing}"
+    # Spot-check contract defaults that downstream WPs rely on.
+    assert s.llm_provider == "ollama_cloud"
+    assert s.debate_mode == "on"
+    assert s.chroma_dir == ".chroma"
+    assert s.embedding_model == "BAAI/bge-small-en-v1.5"
+    assert s.runs_dir == "runs"
+    assert s.langsmith_enabled is False
+
+
 def test_settings_defaults_without_env(monkeypatch):
     # Ensure no env bleed-through from a real .env
     for k in ["OLLAMA_API_KEY", "LLM_BASE_URL", "QUICK_MODEL", "DEEP_MODEL"]:

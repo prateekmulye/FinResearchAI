@@ -18,7 +18,7 @@ _COLLECTION = "verdicts"
 
 
 def _get_store(store: Any | None) -> Any:
-    return store if store is not None else VectorStore()
+    return store if store is not None else VectorStore(collection=_COLLECTION)
 
 
 def _safe_ts(row: dict) -> int:
