@@ -20,7 +20,12 @@ memory = [
 ]
 web     = ["firecrawl-py==4.28.2"]
 data    = ["yfinance==0.2.66", "tradingview-ta==3.3.0"]
-# api     = ["fastapi>=0.125", "uvicorn>=0.30", "sse-starlette>=2.1", "httpx>=0.27"]
+api = [
+    "fastapi==0.136.3",
+    "uvicorn[standard]==0.48.0",
+    "sse-starlette==3.4.4",
+    "httpx==0.28.1",
+]
 dev = [
     "pytest==8.4.2",
     "pytest-asyncio>=0.24",
