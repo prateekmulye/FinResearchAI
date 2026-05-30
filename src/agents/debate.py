@@ -23,6 +23,8 @@ async def run_debate(
     rounds: int,
     tier: str = "deep",
     node_label: str = "debate",
+    *,
+    max_rounds: int = 8,
 ) -> tuple[list[DebateTurn], dict]:
     """Run a bounded alternating debate.
 
@@ -34,6 +36,8 @@ async def run_debate(
                 Values < 1 are clamped to 1 (never an empty debate).
         tier: LLM tier ("deep" by default).
         node_label: metrics node name for all calls in this debate.
+        max_rounds: keyword-only hard cap on rounds (default 8); rounds is
+                    clamped to min(max(1, rounds), max_rounds).
 
     Returns:
         (turns, metrics_per_node) where turns is a flat list of DebateTurn in
@@ -45,7 +49,7 @@ async def run_debate(
     turns: list[DebateTurn] = []
     transcript: list[str] = []
 
-    for rnd in range(1, max(1, rounds) + 1):
+    for rnd in range(1, min(max(1, rounds), max_rounds) + 1):
         for role, system_prompt in personas:
             prior = "\n".join(transcript) if transcript else "(no prior arguments yet)"
             human = (
