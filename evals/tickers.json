@@ -1,0 +1,11 @@
+{
+  "_note": "Curated A/B set — deliberately small and mixed-sector. Regime diversity matters (paper-analysis critique #1): the reference paper evaluated 3-5 mega-caps over a single 3-month bull window. A point-in-time snapshot like this CANNOT prove behavior across bull/bear/sideways regimes; treat sector spread here as a partial mitigation, not a substitute for multi-regime backtesting. Add more tickers / re-run across dates to strengthen claims.",
+  "tickers": [
+    {"ticker": "AAPL", "sector": "Technology"},
+    {"ticker": "JPM",  "sector": "Financials"},
+    {"ticker": "XOM",  "sector": "Energy"},
+    {"ticker": "JNJ",  "sector": "Healthcare"},
+    {"ticker": "WMT",  "sector": "Consumer Staples"},
+    {"ticker": "CAT",  "sector": "Industrials"}
+  ]
+}
