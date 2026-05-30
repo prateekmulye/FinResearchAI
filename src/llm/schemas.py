@@ -36,6 +36,13 @@ class TradeProposal(BaseModel):
     rationale: str
 
 
+class RiskStance(BaseModel):
+    """Structured-output target for a risk persona node.
+    The node unwraps `.stance` into the RiskDebate string field."""
+
+    stance: str = Field(description="The persona's concise risk stance on the trade proposal.")
+
+
 class RiskDebate(BaseModel):
     rounds: list[DebateTurn] = Field(default_factory=list)
     conservative: str = ""

@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from src.llm.schemas import AnalystReport, DebateTurn
+from src.llm.schemas import AnalystReport, DebateTurn, FinalDecision, RiskStance, TradeProposal
 
 # ---------------------------------------------------------------------------
 # Schema registry — only schemas listed here are accepted by the fake LLM.
@@ -26,7 +26,15 @@ from src.llm.schemas import AnalystReport, DebateTurn
 _KNOWN_SCHEMAS: frozenset = frozenset({
     DebateTurn,
     AnalystReport,
+    TradeProposal,
+    FinalDecision,
+    RiskStance,
 })
+
+# Schema names that are accepted even when defined as module-local classes
+# (e.g. conservative.RiskStance, aggressive.RiskStance are structurally identical
+# to schemas.RiskStance but are separate class objects due to linter-enforced locality).
+_KNOWN_SCHEMA_NAMES: frozenset[str] = frozenset(s.__name__ for s in _KNOWN_SCHEMAS)
 
 
 def make_structured_llm(outputs: list[Any]):
@@ -62,7 +70,8 @@ def make_structured_llm(outputs: list[Any]):
         def with_structured_output(self, schema, method="function_calling"):
             # F6: raise loudly for schemas not in the registry so missing
             # mappings fail immediately rather than silently returning wrong data.
-            if schema not in _KNOWN_SCHEMAS:
+            # Accept by identity (canonical) OR by class name (local-class aliases).
+            if schema not in _KNOWN_SCHEMAS and getattr(schema, "__name__", None) not in _KNOWN_SCHEMA_NAMES:
                 raise KeyError(
                     f"conftest: no canned instance registered for {schema}"
                 )
