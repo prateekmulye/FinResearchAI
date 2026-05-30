@@ -71,13 +71,12 @@ async def facilitator(state: AgentState) -> dict:
     messages = [SystemMessage(content=FACILITATOR_SYSTEM), HumanMessage(content=human)]
     verdict: DebateTurn = await verdict_llm.ainvoke(messages, config={"callbacks": [tracker]})
 
-    research_debate = {
-        "rounds": [t.model_dump() for t in turns],
-        "bull_thesis": bull_thesis,
-        "bear_thesis": bear_thesis,
-        "facilitator_verdict": verdict.argument,
-    }
+    # F4: write ONLY the keys facilitator owns; do NOT include bull_thesis/bear_thesis
+    # so the merge reducer retains the real theses written by bull/bear nodes upstream.
     return {
-        "research_debate": research_debate,
+        "research_debate": {
+            "rounds": [t.model_dump() for t in turns],
+            "facilitator_verdict": verdict.argument,
+        },
         "run_metrics": debate_metrics + tracker.totals()["per_node"],
     }

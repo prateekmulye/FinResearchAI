@@ -15,6 +15,19 @@ from typing import Any
 
 import pytest
 
+from src.llm.schemas import AnalystReport, DebateTurn
+
+# ---------------------------------------------------------------------------
+# Schema registry — only schemas listed here are accepted by the fake LLM.
+# Adding a new schema to production code requires registering it here too;
+# an unregistered schema raises KeyError loudly so missing mappings are caught
+# immediately rather than silently returning None or a wrong default.
+# ---------------------------------------------------------------------------
+_KNOWN_SCHEMAS: frozenset = frozenset({
+    DebateTurn,
+    AnalystReport,
+})
+
 
 def make_structured_llm(outputs: list[Any]):
     """Return a fake LLM whose .with_structured_output(...).ainvoke(...) yields
@@ -47,6 +60,12 @@ def make_structured_llm(outputs: list[Any]):
 
     class _LLM:
         def with_structured_output(self, schema, method="function_calling"):
+            # F6: raise loudly for schemas not in the registry so missing
+            # mappings fail immediately rather than silently returning wrong data.
+            if schema not in _KNOWN_SCHEMAS:
+                raise KeyError(
+                    f"conftest: no canned instance registered for {schema}"
+                )
             return _Structured()
 
     return _LLM()

@@ -70,13 +70,61 @@ async def test_facilitator_runs_debate_and_writes_full_research_debate(fake_llm_
     assert rd["facilitator_verdict"]  # non-empty
     assert len(rd["rounds"]) == 2  # the debate turns
     assert rd["rounds"][0]["role"] == "bull"
-    # carried forward from upstream merge (facilitator preserves them)
-    assert rd["bull_thesis"] == "bull case"
-    assert rd["bear_thesis"] == "bear case"
+    # F4: facilitator writes ONLY rounds + facilitator_verdict; it does NOT re-emit
+    # bull_thesis/bear_thesis so the merge reducer preserves the upstream values.
+    assert "bull_thesis" not in rd
+    assert "bear_thesis" not in rd
     # metrics from the debate (node_label="research_debate") + the facilitator verdict call
     nodes = {m["node"] for m in out["run_metrics"]}
     assert "facilitator" in nodes
     assert "research_debate" in nodes
+
+
+@pytest.mark.asyncio
+async def test_facilitator_merge_preserves_bull_and_bear_theses(fake_llm_factory):
+    """After bull→bear→facilitator the merged research_debate retains all three fields.
+
+    Simulates the merge_named_reports reducer by applying bull, bear, and facilitator
+    outputs in sequence (as LangGraph would) and asserting the final merged dict has
+    bull_thesis, bear_thesis, AND facilitator_verdict all non-empty.
+    """
+    from src.state import merge_named_reports
+
+    # bull: 1 call, bear: 1 call, facilitator: 2 debate turns + 1 verdict = 5 total
+    fake_llm_factory(
+        [
+            DebateTurn(role="bull", round=1, argument="strong growth runway"),   # bull node
+            DebateTurn(role="bear", round=1, argument="valuation risk is real"), # bear node
+            DebateTurn(role="bull", round=1, argument="debate bull rebuttal"),   # facilitator debate turn 1
+            DebateTurn(role="bear", round=1, argument="debate bear rebuttal"),   # facilitator debate turn 2
+            DebateTurn(role="bull", round=1, argument="lean BUY on balance"),    # facilitator verdict
+        ],
+        ["src.agents.debate", "src.agents.research.bull",
+         "src.agents.research.bear", "src.agents.research.facilitator"],
+    )
+    from src.agents.research.bull import bull
+    from src.agents.research.bear import bear
+    from src.agents.research.facilitator import facilitator
+
+    state = _synthetic_state()
+
+    bull_out = await bull(state)
+    bear_out = await bear(state)
+
+    # Simulate the merge reducer: accumulate research_debate as LangGraph would.
+    merged_rd = merge_named_reports({}, bull_out["research_debate"])
+    merged_rd = merge_named_reports(merged_rd, bear_out["research_debate"])
+
+    # Feed merged state to facilitator (it reads bull_thesis/bear_thesis from state).
+    state["research_debate"] = merged_rd
+    fac_out = await facilitator(state)
+
+    # Final merge: apply facilitator's partial dict onto the accumulated state.
+    final_rd = merge_named_reports(merged_rd, fac_out["research_debate"])
+
+    assert final_rd["bull_thesis"], "bull_thesis must survive the merge"
+    assert final_rd["bear_thesis"], "bear_thesis must survive the merge"
+    assert final_rd["facilitator_verdict"], "facilitator_verdict must be non-empty"
 
 
 @pytest.mark.asyncio

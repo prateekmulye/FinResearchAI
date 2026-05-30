@@ -11,6 +11,8 @@ Topology:
 """
 from __future__ import annotations
 
+import importlib
+import importlib.util
 import logging
 
 from langgraph.graph import END, START, StateGraph
@@ -27,6 +29,35 @@ _LOG = logging.getLogger(__name__)
 def _metric(node: str) -> list[dict]:
     return [{"node": node, "model": "", "prompt_tokens": 0, "completion_tokens": 0,
              "latency_s": 0.0, "cost_usd": 0.0}]
+
+
+def _resolve(module_path: str, attr: str, fallback):
+    """Return the real callable from module_path.attr when the module EXISTS on disk
+    and exports the expected attr.
+
+    Falls back to ``fallback`` only when the module is genuinely absent:
+      - find_spec returns None (module file not on sys.path), or
+      - find_spec raises ModuleNotFoundError (parent package absent), or
+      - the module exists but does not yet export ``attr`` (WP not yet implemented).
+
+    A module that IS present and exports ``attr`` but fails to import (broken
+    internal code) propagates loudly rather than being silently swapped for the
+    stub — that is the core of the F2 fix.
+    """
+    try:
+        spec = importlib.util.find_spec(module_path)
+    except ModuleNotFoundError:
+        # Parent package does not exist — module is genuinely absent.
+        _LOG.debug("%s parent not found; using stub for %s", module_path, attr)
+        return fallback
+    if spec is None:
+        _LOG.debug("%s not found; using stub for %s", module_path, attr)
+        return fallback
+    mod = importlib.import_module(module_path)  # ImportError from broken code → raises
+    if not hasattr(mod, attr):
+        _LOG.debug("%s.%s not defined; using stub (WP not yet implemented)", module_path, attr)
+        return fallback
+    return getattr(mod, attr)
 
 
 # ---------------------------------------------------------------------------
@@ -113,85 +144,45 @@ def _stub_reporter(state: AgentState) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Guarded real-module imports — each WP's callable activates when merged.
+# Guarded real-module resolution — uses find_spec so only a GENUINELY ABSENT
+# module triggers the stub fallback; a broken-but-present module raises loudly.
 # ---------------------------------------------------------------------------
 
 # WP-B
-try:
-    from src.agents.router import router
-except ImportError:
-    _LOG.debug("WP-B router not merged; using stub")
-    router = _stub_router  # type: ignore[assignment]
+router = _resolve("src.agents.router", "router", _stub_router)
 
-try:
-    from src.agents.analysts.news import news_analyst
-    from src.agents.analysts.fundamentals import fundamentals_analyst
-    from src.agents.analysts.technicals import technicals_analyst
+_news_analyst = _resolve("src.agents.analysts.news", "news_analyst", None)
+_fundamentals_analyst = _resolve("src.agents.analysts.fundamentals", "fundamentals_analyst", None)
+_technicals_analyst = _resolve("src.agents.analysts.technicals", "technicals_analyst", None)
+if all(v is not None for v in [_news_analyst, _fundamentals_analyst, _technicals_analyst]):
     _ANALYSTS_REAL = {
-        "news": news_analyst,
-        "fundamentals": fundamentals_analyst,
-        "technicals": technicals_analyst,
+        "news": _news_analyst,
+        "fundamentals": _fundamentals_analyst,
+        "technicals": _technicals_analyst,
     }
-except ImportError:
-    _LOG.debug("WP-B analysts not merged; using stubs")
+else:
     _ANALYSTS_REAL = {}
 
 # WP-D (owned here — always present after this WP merges)
-try:
-    from src.agents.research.bull import bull
-except ImportError:
-    _LOG.debug("WP-D bull not merged; using stub")
-    bull = _stub_bull  # type: ignore[assignment]
-
-try:
-    from src.agents.research.bear import bear
-except ImportError:
-    _LOG.debug("WP-D bear not merged; using stub")
-    bear = _stub_bear  # type: ignore[assignment]
-
-try:
-    from src.agents.research.facilitator import facilitator
-except ImportError:
-    _LOG.debug("WP-D facilitator not merged; using stub")
-    facilitator = _stub_facilitator  # type: ignore[assignment]
-
-try:
-    from src.agents.research.synthesis import research_synthesis
-except ImportError:
-    _LOG.debug("WP-D research_synthesis not merged; using stub")
-    research_synthesis = _stub_research_synthesis  # type: ignore[assignment]
+bull = _resolve("src.agents.research.bull", "bull", _stub_bull)
+bear = _resolve("src.agents.research.bear", "bear", _stub_bear)
+facilitator = _resolve("src.agents.research.facilitator", "facilitator", _stub_facilitator)
+research_synthesis = _resolve(
+    "src.agents.research.synthesis", "research_synthesis", _stub_research_synthesis
+)
 
 # WP-E
-try:
-    from src.agents.trader import trader
-except ImportError:
-    _LOG.debug("WP-E trader not merged; using stub")
-    trader = _stub_trader  # type: ignore[assignment]
-
-try:
-    from src.agents.risk.conservative import risk_conservative
-except ImportError:
-    _LOG.debug("WP-E risk_conservative not merged; using stub")
-    risk_conservative = _stub_risk_conservative  # type: ignore[assignment]
-
-try:
-    from src.agents.risk.aggressive import risk_aggressive
-except ImportError:
-    _LOG.debug("WP-E risk_aggressive not merged; using stub")
-    risk_aggressive = _stub_risk_aggressive  # type: ignore[assignment]
-
-try:
-    from src.agents.risk.arbiter import risk_arbiter
-except ImportError:
-    _LOG.debug("WP-E risk_arbiter not merged; using stub")
-    risk_arbiter = _stub_risk_arbiter  # type: ignore[assignment]
+trader = _resolve("src.agents.trader", "trader", _stub_trader)
+risk_conservative = _resolve(
+    "src.agents.risk.conservative", "risk_conservative", _stub_risk_conservative
+)
+risk_aggressive = _resolve(
+    "src.agents.risk.aggressive", "risk_aggressive", _stub_risk_aggressive
+)
+risk_arbiter = _resolve("src.agents.risk.arbiter", "risk_arbiter", _stub_risk_arbiter)
 
 # WP-F
-try:
-    from src.agents.reporter import reporter
-except ImportError:
-    _LOG.debug("WP-F reporter not merged; using stub")
-    reporter = _stub_reporter  # type: ignore[assignment]
+reporter = _resolve("src.agents.reporter", "reporter", _stub_reporter)
 
 
 # ---------------------------------------------------------------------------
