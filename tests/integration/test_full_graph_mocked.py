@@ -73,6 +73,14 @@ async def test_full_graph_composes_for_both_modes(mode, offline_graph):
     # Research debate produced a facilitator verdict in BOTH modes.
     assert result["research_debate"]["facilitator_verdict"], "no facilitator verdict"
 
+    # Trader proposal survived into state (not silently dropped).
+    tp = result["trade_proposal"]
+    assert tp["action"] in {"BUY", "SELL", "HOLD"}
+
+    # Risk personas both wrote their stance (merge reducer kept both sub-keys).
+    rd = result["risk_debate"]
+    assert rd.get("conservative") and rd.get("aggressive"), "risk stances dropped"
+
     # Trader + risk arbiter produced a coherent final decision.
     fd = result["final_decision"]
     assert fd["action"] in {"BUY", "SELL", "HOLD"}
