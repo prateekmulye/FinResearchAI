@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FinResearchAI</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { font-family: system-ui, sans-serif; max-width: 820px; margin: 2rem auto; padding: 0 1rem;
+           background: #0f1115; color: #e6e6e6; }
+    h1 { font-size: 1.4rem; }
+    form { display: flex; gap: .5rem; flex-wrap: wrap; margin-bottom: 1rem; }
+    input, select, button { padding: .5rem .6rem; border-radius: 6px; border: 1px solid #333;
+                            background: #1a1d24; color: #e6e6e6; font-size: .95rem; }
+    button { cursor: pointer; background: #2d6cdf; border-color: #2d6cdf; }
+    button:disabled { opacity: .5; cursor: default; }
+    #steps { list-style: none; padding: 0; margin: 1rem 0; }
+    #steps li { padding: .4rem .6rem; border-left: 3px solid #2d6cdf; margin-bottom: .3rem;
+                background: #161922; border-radius: 0 6px 6px 0; }
+    #steps li.done { border-left-color: #3fb950; }
+    #report { white-space: pre-wrap; background: #161922; padding: 1rem; border-radius: 8px; }
+    .err { color: #f85149; }
+    .meta { color: #8b949e; font-size: .85rem; }
+  </style>
+</head>
+<body>
+  <h1>FinResearchAI — live analysis</h1>
+  <form id="f">
+    <input id="ticker" placeholder="Ticker (e.g. AAPL)" value="AAPL" required />
+    <select id="mode">
+      <option>Neutral</option><option>Bullish</option><option>Bearish</option>
+    </select>
+    <select id="debate">
+      <option value="">debate: default</option>
+      <option value="on">debate: on</option>
+      <option value="off">debate: off</option>
+    </select>
+    <button id="go" type="submit">Analyze</button>
+  </form>
+
+  <ul id="steps"></ul>
+  <div id="tokens" class="meta"></div>
+  <h2 id="reportHead" style="display:none">Report</h2>
+  <pre id="report"></pre>
+
+  <script>
+    const API = (location.origin && location.origin !== "null") ? location.origin : "http://localhost:8000";
+    const f = document.getElementById("f");
+    const steps = document.getElementById("steps");
+    const report = document.getElementById("report");
+    const reportHead = document.getElementById("reportHead");
+    const tokens = document.getElementById("tokens");
+    const go = document.getElementById("go");
+
+    function reset() { steps.innerHTML = ""; report.textContent = ""; tokens.textContent = "";
+                       reportHead.style.display = "none"; }
+    function addStep(node, cls) {
+      const li = document.createElement("li");
+      li.id = "step-" + node; li.textContent = node; if (cls) li.className = cls;
+      steps.appendChild(li); return li;
+    }
+
+    // Minimal SSE frame parser over a fetch body stream.
+    function handleEvent(name, dataStr) {
+      let data; try { data = JSON.parse(dataStr); } catch { return; }
+      if (name === "node_start") { if (!document.getElementById("step-" + data.node)) addStep(data.node); }
+      else if (name === "node_complete") {
+        const el = document.getElementById("step-" + data.node) || addStep(data.node);
+        el.className = "done";
+      }
+      else if (name === "token") { tokens.textContent += data.text; }
+      else if (name === "done") {
+        reportHead.style.display = "block";
+        report.textContent = data.final_report || "(no report)";
+        const d = data.final_decision || {};
+        addStep(`DONE — ${d.action || "?"} (score ${d.score ?? "?"})`, "done");
+        go.disabled = false;
+      }
+      else if (name === "error") {
+        const li = addStep("error: " + (data.message || "unknown")); li.className = "err";
+        go.disabled = false;
+      }
+    }
+
+    f.addEventListener("submit", async (e) => {
+      e.preventDefault(); reset(); go.disabled = true;
+      const payload = {
+        ticker: document.getElementById("ticker").value,
+        investor_mode: document.getElementById("mode").value,
+      };
+      const dm = document.getElementById("debate").value; if (dm) payload.debate_mode = dm;
+
+      let resp;
+      try {
+        resp = await fetch(API + "/analyze", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+      } catch (err) { addStep("network error: " + err).className = "err"; go.disabled = false; return; }
+
+      if (resp.status === 429) { addStep("rate limited — try later").className = "err"; go.disabled = false; return; }
+      if (!resp.ok) { addStep("error " + resp.status).className = "err"; go.disabled = false; return; }
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        buf = buf.replace(/\r\n/g, "\n");
+        let idx;
+        while ((idx = buf.indexOf("\n\n")) !== -1) {
+          const frame = buf.slice(0, idx); buf = buf.slice(idx + 2);
+          let ev = "message"; const dataLines = [];
+          for (const line of frame.split("\n")) {
+            if (line.startsWith("event:")) ev = line.slice(6).trim();
+            else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+          }
+          if (dataLines.length) handleEvent(ev, dataLines.join(""));
+        }
+      }
+      go.disabled = false;
+    });
+  </script>
+</body>
+</html>
