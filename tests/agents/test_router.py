@@ -55,3 +55,16 @@ def test_ticker_resolution_schema_defaults():
     r = TickerResolution(resolved_ticker="MSFT")
     assert r.screener == "america"
     assert r.exchange == "NASDAQ"
+
+
+from src.llm.schemas import FinalDecision
+
+
+async def test_router_cache_short_circuits(patch_llm, monkeypatch):
+    patch_llm(TickerResolution(resolved_ticker="AAPL", screener="america", exchange="NASDAQ"))
+    cached = FinalDecision(action="BUY", conviction=0.7, score=72, rationale="cached")
+    monkeypatch.setattr(router_mod, "_get_cached_verdict", lambda ticker, max_age_min: cached)
+    out = await router({"ticker": "AAPL", "investor_mode": "Neutral"})
+    assert out["final_decision"]["action"] == "BUY"
+    assert out["final_decision"]["score"] == 72
+    assert out["model_plan"]["cache_hit"] is True
