@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Literal
 
 from langchain_openai import ChatOpenAI
 
@@ -15,7 +16,7 @@ STRUCT_METHOD = "function_calling"
 
 
 @lru_cache(maxsize=None)
-def get_llm(tier: str) -> ChatOpenAI:
+def get_llm(tier: Literal["quick", "deep"]) -> ChatOpenAI:
     """Return a cached ChatOpenAI pointed at the configured provider for the given tier.
 
     tier: "quick" (retrieval/summary/formatting) or "deep" (debate/verdict/arbiter).

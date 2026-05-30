@@ -3,7 +3,7 @@ import pytest
 
 from src.agents.risk import conservative as cons_mod
 from src.agents.risk import aggressive as aggr_mod
-from src.agents.risk.conservative import RiskStance
+from src.llm.schemas import RiskStance
 
 
 @pytest.mark.asyncio
@@ -27,8 +27,7 @@ async def test_conservative_writes_conservative_key(monkeypatch, make_fake_llm):
 
 @pytest.mark.asyncio
 async def test_aggressive_writes_aggressive_key(monkeypatch, make_fake_llm):
-    from src.agents.risk.aggressive import RiskStance as AggrStance
-    stance = AggrStance(stance="Press the position; momentum favors upside.")
+    stance = RiskStance(stance="Press the position; momentum favors upside.")
     fake = make_fake_llm([stance])
     monkeypatch.setattr(aggr_mod, "get_llm", lambda tier: fake)
 
@@ -47,8 +46,8 @@ async def test_aggressive_writes_aggressive_key(monkeypatch, make_fake_llm):
 async def test_personas_write_disjoint_keys_for_merge_reducer(monkeypatch, make_fake_llm):
     """conservative + aggressive run in parallel; they must write different sub-keys
     so merge_named_reports combines them without conflict."""
-    cons_fake = make_fake_llm([cons_mod.RiskStance(stance="careful")])
-    aggr_fake = make_fake_llm([aggr_mod.RiskStance(stance="bold")])
+    cons_fake = make_fake_llm([RiskStance(stance="careful")])
+    aggr_fake = make_fake_llm([RiskStance(stance="bold")])
     monkeypatch.setattr(cons_mod, "get_llm", lambda tier: cons_fake)
     monkeypatch.setattr(aggr_mod, "get_llm", lambda tier: aggr_fake)
 

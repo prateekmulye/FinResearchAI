@@ -14,8 +14,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.llm.schemas import DebateTurn, FinalDecision, TradeProposal
-from src.agents.risk.conservative import RiskStance
+from src.llm.schemas import DebateTurn, FinalDecision, RiskStance, TradeProposal
 
 
 # ---------------------------------------------------------------------------

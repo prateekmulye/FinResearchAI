@@ -32,6 +32,7 @@ class AgentState(TypedDict, total=False):
     trade_proposal: dict
     final_decision: dict
     final_report: str
+    financial_data: dict  # WP-F: radar/metric-card inputs for UI (terminal single-writer)
 
     # --- observability (accumulated across nodes) ---
     run_metrics: Annotated[list, operator.add]

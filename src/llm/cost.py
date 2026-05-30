@@ -35,6 +35,11 @@ class CostTracker(BaseCallbackHandler):
     def on_llm_start(self, serialized, prompts, *, run_id=None, **kwargs) -> None:
         self._starts[run_id] = time.perf_counter()
 
+    def on_llm_error(self, error, *, run_id=None, **kwargs) -> None:
+        # A failed call never reaches on_llm_end; drop its start marker so the
+        # tracker doesn't leak an entry. No cost record is added for a failed call.
+        self._starts.pop(run_id, None)
+
     def on_llm_end(self, response, *, run_id=None, **kwargs) -> None:
         start = self._starts.pop(run_id, time.perf_counter())
         elapsed = time.perf_counter() - start

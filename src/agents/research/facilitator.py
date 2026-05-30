@@ -9,15 +9,19 @@ returned partial dict is merged into existing state."""
 from __future__ import annotations
 
 import json
+import logging
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from src.agents._metrics import zero_metrics
 from src.agents.debate import run_debate
 from src.config.settings import get_settings
 from src.llm.cost import CostTracker
 from src.llm.factory import STRUCT_METHOD, get_llm
 from src.llm.schemas import DebateTurn
 from src.state import AgentState
+
+_LOG = logging.getLogger(__name__)
 
 FACILITATOR_SYSTEM = (
     "You are the research facilitator. You have moderated a bounded bull vs bear "
@@ -69,14 +73,22 @@ async def facilitator(state: AgentState) -> dict:
         "Now deliver the prevailing-view verdict."
     )
     messages = [SystemMessage(content=FACILITATOR_SYSTEM), HumanMessage(content=human)]
-    verdict: DebateTurn = await verdict_llm.ainvoke(messages, config={"callbacks": [tracker]})
+    try:
+        verdict: DebateTurn = await verdict_llm.ainvoke(messages, config={"callbacks": [tracker]})
+        verdict_text = verdict.argument
+    except Exception as exc:
+        # Degrade: keep the debate turns/metrics; emit a neutral verdict so the
+        # trader still has a usable facilitator_verdict and the node keeps its line.
+        _LOG.warning("facilitator: verdict LLM failed (%s); degrading to neutral verdict", exc)
+        verdict_text = "Debate inconclusive; treat as HOLD pending clearer signals."
 
     # F4: write ONLY the keys facilitator owns; do NOT include bull_thesis/bear_thesis
     # so the merge reducer retains the real theses written by bull/bear nodes upstream.
+    own_metrics = tracker.totals()["per_node"] or zero_metrics("facilitator")
     return {
         "research_debate": {
             "rounds": [t.model_dump() for t in turns],
-            "facilitator_verdict": verdict.argument,
+            "facilitator_verdict": verdict_text,
         },
-        "run_metrics": debate_metrics + tracker.totals()["per_node"],
+        "run_metrics": debate_metrics + own_metrics,
     }

@@ -8,21 +8,13 @@ import logging
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from pydantic import BaseModel, Field
-
 from src.agents._metrics import zero_metrics
 from src.llm.cost import CostTracker
 from src.llm.factory import STRUCT_METHOD, get_llm
+from src.llm.schemas import RiskStance
 from src.state import AgentState
 
 _LOG = logging.getLogger(__name__)
-
-
-class RiskStance(BaseModel):
-    """Local structured-output target for a risk persona. Not part of the frozen
-    contract; the node unwraps `.stance` into the RiskDebate string field."""
-
-    stance: str = Field(description="The persona's concise risk stance on the trade proposal.")
 
 
 AGGRESSIVE_SYSTEM = (

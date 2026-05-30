@@ -12,6 +12,7 @@ import pytest
 
 from src.graph import build_graph
 from src.llm.schemas import AnalystReport, DebateTurn
+from src.agents.reporter import ReportPayload, ReportSection, FinancialData
 
 
 def test_graph_compiles():
@@ -21,6 +22,15 @@ def test_graph_compiles():
 # ---------------------------------------------------------------------------
 # Schema-aware LLM fake for offline graph execution
 # ---------------------------------------------------------------------------
+
+_CANNED_REPORT_PAYLOAD = ReportPayload(
+    sections=[ReportSection(heading="Summary", body="stub report ok")],
+    financial_data=FinancialData(
+        valuation=50.0, growth=50.0, profitability=50.0,
+        momentum=50.0, sentiment=50.0, risk=50.0,
+    ),
+)
+
 
 class _SchemaAwareStructured:
     """Returns the correct canned Pydantic instance for whichever schema is requested."""
@@ -51,6 +61,10 @@ class _SchemaAwareStructured:
             isinstance(self._schema, type) and issubclass(self._schema, AnalystReport)
         ):
             return self._analyst
+        if self._schema is ReportPayload or (
+            isinstance(self._schema, type) and issubclass(self._schema, ReportPayload)
+        ):
+            return _CANNED_REPORT_PAYLOAD
         return self._turn
 
 
@@ -70,6 +84,7 @@ def _patch_all(monkeypatch):
     import src.agents.research.facilitator as fac_mod
     import src.agents.research.synthesis as syn_mod
     import src.agents.debate as debate_mod
+    import src.agents.reporter as reporter_mod
     from src.agents.router import TickerResolution
     from src.tools.yfinance import Fundamentals
     from src.tools.tradingview import Technicals
@@ -91,6 +106,9 @@ def _patch_all(monkeypatch):
     for mod in (news_mod, fund_mod, tech_mod, bull_mod, bear_mod, fac_mod, syn_mod, debate_mod):
         if hasattr(mod, "get_llm"):
             monkeypatch.setattr(mod, "get_llm", lambda tier, _llm=fake_llm: _llm)
+
+    # Reporter uses ReportPayload — patch its get_llm with the schema-aware fake
+    monkeypatch.setattr(reporter_mod, "get_llm", lambda tier, _llm=fake_llm: _llm)
 
     # --- tool fakes (no network) ---
     monkeypatch.setattr(news_mod, "search_news", lambda q, limit=5: [
@@ -115,6 +133,10 @@ async def test_graph_runs_end_to_end(monkeypatch):
     assert result["resolved_ticker"]  # router ran
     assert "final_report" in result  # reporter ran
     assert result["final_decision"]["action"] in {"BUY", "SELL", "HOLD"}
+    # WP-F: financial_data written by real reporter
+    assert "financial_data" in result
+    assert set(result["financial_data"]) >= {"valuation", "growth", "profitability",
+                                              "momentum", "sentiment", "risk"}
 
 
 @pytest.mark.asyncio

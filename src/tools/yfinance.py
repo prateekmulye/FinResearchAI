@@ -61,7 +61,7 @@ def fetch_fundamentals(ticker: str) -> Fundamentals:
         trailing_pe=info.get("trailingPE"),
         forward_pe=info.get("forwardPE"),
         earnings_growth=info.get("earningsQuarterlyGrowth"),
-        revenue_growth=info.get("revenueGrowth", info.get("revenueQuarterlyGrowth")),
+        revenue_growth=info.get("revenueGrowth"),
         dividend_yield=info.get("dividendYield"),
         payout_ratio=info.get("payoutRatio"),
         profit_margins=info.get("profitMargins"),
