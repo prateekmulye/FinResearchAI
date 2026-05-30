@@ -23,11 +23,21 @@ from src.api.schemas import AnalyzeRequest
 from src.api.stream import analyze_event_stream
 
 
+def _trust_proxy() -> bool:
+    return os.getenv("TRUST_PROXY", "").lower() in {"1", "true", "yes"}
+
+
 def _client_key(request: Request) -> str:
-    # Honor a proxy hop (HF Spaces sits behind a proxy), else the socket peer.
-    fwd = request.headers.get("x-forwarded-for")
-    if fwd:
-        return fwd.split(",")[0].strip()
+    # X-Forwarded-For is client-spoofable, so only honor it when TRUST_PROXY is set
+    # (i.e. we are knowingly behind a trusted proxy such as the HF Spaces edge). When
+    # trusted, take the LAST hop the proxy appended, not the client-controlled first.
+    # Otherwise key on the real socket peer so the limiter can't be trivially bypassed.
+    if _trust_proxy():
+        fwd = request.headers.get("x-forwarded-for")
+        if fwd:
+            hops = [h.strip() for h in fwd.split(",") if h.strip()]
+            if hops:
+                return hops[-1]
     return request.client.host if request.client else "unknown"
 
 
@@ -66,6 +76,7 @@ def create_app(
             ticker=req.ticker,
             investor_mode=req.investor_mode,
             debate_mode=req.debate_mode,
+            runs_dir=str(runs_path),
         )
         return EventSourceResponse(generator, ping=15)
 

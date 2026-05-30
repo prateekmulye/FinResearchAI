@@ -85,6 +85,9 @@ async def test_stream_emits_error_event_on_graph_failure(monkeypatch):
     def boom(*a, **k):
         raise RuntimeError("kaboom")
 
+    # _compiled_graph memoizes per debate_mode; clear it so the patched build_graph
+    # is actually invoked instead of a graph cached by an earlier test.
+    stream_mod._compiled_graph.cache_clear()
     monkeypatch.setattr(stream_mod, "build_graph", boom)
     events = await _collect(
         analyze_event_stream(
