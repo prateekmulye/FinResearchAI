@@ -103,3 +103,19 @@ def test_default_store_is_constructed_lazily(monkeypatch):
     monkeypatch.setattr(cache_mod, "VectorStore", SpyStore)
     store_verdict("NVDA", _decision(), now=7)  # no store= kwarg
     assert built.get("yes") is True
+
+
+def test_cache_end_to_end_against_real_chroma(tmp_path):
+    from src.memory.store import VectorStore
+
+    store = VectorStore(persist_dir=str(tmp_path), collection="verdicts", embedder=FakeEmbedder())
+    store_verdict("AAPL", _decision(action="HOLD", score=55), store=store, now=10_000)
+
+    fresh = get_cached_verdict("AAPL", max_age_min=60, store=store, now=10_000 + 10 * 60)
+    assert fresh is not None and fresh.action == "HOLD" and fresh.score == 55
+
+    stale = get_cached_verdict("AAPL", max_age_min=5, store=store, now=10_000 + 10 * 60)
+    assert stale is None
+
+    missing = get_cached_verdict("ZZZZ", max_age_min=60, store=store, now=10_000)
+    assert missing is None
