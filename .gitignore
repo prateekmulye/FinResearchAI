@@ -132,3 +132,7 @@ venv.bak/
 src/__pycache__/state.cpython-313.pyc
 src/__pycache__/graph.cpython-313.pyc
 src/__pycache__/state.cpython-313.pyc
+
+# RunRecorder trace output
+runs/
+.chroma/

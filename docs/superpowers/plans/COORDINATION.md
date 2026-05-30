@@ -179,6 +179,17 @@ all = [ "<everything from data + web + memory + api + dev>" ]
 ### 7.2 `src/graph.py` is owned solely by WP-D
 Only **WP-D** edits `build_graph` (wiring, node imports, the `debate_mode` toggle). Every other node-owning WP (B/E/F) ONLY delivers its node module with the agreed function name/signature; it does **not** edit `build_graph`'s `add_node`/`add_edge`/import lines. The "swap stub import → real import" edits are performed in `build_graph` by WP-D (or at integration). This removes the WP-B↔WP-D conflict: WP-B's plan step that edits `graph.py` wiring is superseded — WP-B delivers `router`/analyst modules only; WP-D imports them.
 
+**Clarification (binding) — this means WP-B is correct to NOT touch `src/graph.py`.** A spec reviewer flagged WP-B for "not updating build_graph"; that flag is dismissed — WP-B's plan Task 13 (which edited `build_graph`) is explicitly superseded by this section.
+
+**Mechanism WP-D must implement — guarded imports for ALL real nodes.** When WP-D rewrites `build_graph`, it wires the real callables for **every** node-owning WP (its own bull/bear/facilitator/synthesis AND WP-B's router+3 analysts AND WP-E's trader+3 risk nodes AND WP-F's reporter), each behind a guarded import so an unmerged WP falls back to the existing stub:
+```python
+try:
+    from src.agents.router import router            # WP-B
+except ImportError:
+    from src.graph_stubs import router               # or keep the inline stub
+```
+This makes each WP's real node auto-activate the moment its module exists on the branch, requires editing `graph.py` exactly once (in WP-D), and needs NO big-bang integration. WP-D's executor MUST wire B/E/F nodes too — not only D's own. If a node module is absent at WP-D time, its stub remains and is swapped in automatically when that WP merges.
+
 ### 7.3 Async nodes + the Foundation skeleton test
 Real nodes are `async def`. LangGraph's compiled `app.invoke(...)` DOES execute async nodes (it drives the event loop), so `tests/test_graph_skeleton.py` keeps passing as written. WP-D may optionally switch that test to `await app.ainvoke(...)` under pytest-asyncio, but it is not required. New per-node tests use `app.ainvoke`/`pytest.mark.asyncio`.
 
