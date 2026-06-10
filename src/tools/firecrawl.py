@@ -52,6 +52,12 @@ def _client():
 
 
 def search_news(query: str, limit: int = 5) -> list[NewsHit]:
+    # APP_FAKE_LLM seam (WP-5): flag read at CALL time; canned deterministic
+    # headlines, no network. Lazy import avoids a module cycle.
+    if get_settings().fake_llm:
+        from src.tools.fake_data import fake_news_hits
+
+        return fake_news_hits(query, limit)
     try:
         result = _client().search(query, limit=limit)
     except Exception as exc:  # surface, never swallow

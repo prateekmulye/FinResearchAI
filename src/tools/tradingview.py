@@ -11,6 +11,7 @@ from __future__ import annotations
 import time
 from dataclasses import asdict, dataclass
 
+from src.config.settings import get_settings
 from src.tools import ToolError
 
 # Fallback chain by screener: if the primary exchange fails, try siblings.
@@ -60,6 +61,12 @@ def _candidate_exchanges(screener: str, exchange: str) -> list[str]:
 
 
 def fetch_technicals(ticker: str, screener: str, exchange: str) -> Technicals:
+    # APP_FAKE_LLM seam (WP-5): flag read at CALL time; canned deterministic
+    # signals, no network. Lazy import avoids a module cycle.
+    if get_settings().fake_llm:
+        from src.tools.fake_data import fake_technicals
+
+        return fake_technicals(ticker, screener, exchange)
     candidates = _candidate_exchanges(screener, exchange)
     last_exc: Exception | None = None
     for attempt, ex in enumerate(candidates):

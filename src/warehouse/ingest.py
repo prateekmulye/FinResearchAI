@@ -197,7 +197,16 @@ async def record_news(
 
 
 async def _fetch_daily_bars(ticker: str, start: datetime | None) -> list[dict[str, Any]]:
-    """Default price fetcher: daily OHLCV from yfinance, off the event loop."""
+    """Default price fetcher: daily OHLCV from yfinance, off the event loop.
+
+    APP_FAKE_LLM seam (WP-5): flag read at CALL time; deterministic generated
+    bars, no network (same per-tool-seam choice as src/tools/*)."""
+    from src.config.settings import get_settings  # local: ingest stays settings-free otherwise
+
+    if get_settings().fake_llm:
+        from src.tools.fake_data import fake_daily_bars
+
+        return fake_daily_bars(ticker, start)
 
     def _history() -> list[dict[str, Any]]:
         import yfinance as yf

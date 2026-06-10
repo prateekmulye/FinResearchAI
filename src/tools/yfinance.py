@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 
+from src.config.settings import get_settings
 from src.tools import ToolError
 
 
@@ -39,6 +40,12 @@ def _ticker_info(ticker: str) -> dict:
 
 
 def fetch_fundamentals(ticker: str) -> Fundamentals:
+    # APP_FAKE_LLM seam (WP-5): flag read at CALL time; canned deterministic data,
+    # no network. Lazy import avoids a module cycle (fake_data imports Fundamentals).
+    if get_settings().fake_llm:
+        from src.tools.fake_data import fake_fundamentals
+
+        return fake_fundamentals(ticker)
     try:
         info = _ticker_info(ticker)
     except Exception as exc:
