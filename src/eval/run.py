@@ -5,6 +5,9 @@ Usage:
 
 Loads tickers, runs build_graph("on") vs build_graph("off") per ticker, judges
 each pair with the deep model, and writes evals/report-<label>.{md,json}.
+When the warehouse is enabled the same result (label + summary + per-ticker
+rows) is also persisted to ``eval_results`` for GET /api/eval/results (WP-10);
+persistence never raises, so file outputs are unaffected either way.
 The quality number is a PROXY (judge preference + score/cost/latency deltas), not
 realized P&L — see src/eval/report.PROXY_DISCLAIMER."""
 from __future__ import annotations
@@ -16,7 +19,8 @@ from pathlib import Path
 
 from src.eval.harness import PairedResult, run_ab
 from src.eval.judge import JudgeVerdict, judge_decision
-from src.eval.report import write_report
+from src.eval.report import _per_ticker_rows, aggregate, write_report
+from src.warehouse.ingest import record_eval_result
 
 
 def load_tickers(path: str) -> list[str]:
@@ -55,6 +59,12 @@ async def run_eval(tickers_path: str, label: str, concurrency: int, out_dir: str
     verdicts = await _judge_all(pairs, concurrency=concurrency)
     md_path, json_path = write_report(pairs, verdicts, label=label, out_dir=out_dir)
     print(f"[eval] wrote {md_path} and {json_path}")
+    # WP-10: persist the same summary + per-ticker rows the JSON report carries
+    # so GET /api/eval/results serves real data. Runs AFTER the file writes and
+    # never raises (warehouse disabled -> no-op False), so the eval's file
+    # outputs are identical with or without a warehouse.
+    if await record_eval_result(label, aggregate(pairs, verdicts), _per_ticker_rows(pairs, verdicts)):
+        print(f"[eval] persisted eval result label={label!r} to warehouse")
     return md_path
 
 

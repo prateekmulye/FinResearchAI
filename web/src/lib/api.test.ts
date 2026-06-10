@@ -96,6 +96,11 @@ describe("api client — request shaping", () => {
     );
   });
 
+  it("evalResults() hits /api/eval/results with the limit", async () => {
+    await api.evalResults({ limit: 20 });
+    expect(fetchMock.mock.calls[0]![0]).toBe("/api/eval/results?limit=20");
+  });
+
   it("quota() and health() hit fixed paths", async () => {
     await api.quota();
     await api.health();

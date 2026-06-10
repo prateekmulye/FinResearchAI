@@ -15,13 +15,21 @@ from src.warehouse.ingest import (
     ensure_instrument,
     fundamentals_stale,
     prices_stale,
+    record_eval_result,
     record_fundamentals,
     record_news,
     record_run_finish,
     record_run_start,
     refresh_prices,
 )
-from src.warehouse.models import FundamentalsSnapshot, Instrument, NewsItem, PriceBar, Run
+from src.warehouse.models import (
+    EvalResult,
+    FundamentalsSnapshot,
+    Instrument,
+    NewsItem,
+    PriceBar,
+    Run,
+)
 
 NOW = datetime(2026, 6, 10, 12, 0, 0, tzinfo=UTC)
 
@@ -72,6 +80,8 @@ async def test_disabled_warehouse_all_functions_noop():
     fetch, calls = _make_fetch([_bars(3, NOW)])
     assert await refresh_prices("AAPL", "NASDAQ", "america", fetch=fetch) == 0
     assert calls == [], "disabled warehouse must never invoke the price fetcher"
+
+    assert await record_eval_result("demo", {"n_tickers": 1}, [{"ticker": "AAPL"}]) is False
 
 
 # ----------------------------------------------------------- ensure_instrument
@@ -430,3 +440,38 @@ async def test_stale_helpers_db_error_degrades_to_false(sqlite_warehouse, monkey
         # False => callers skip the redundant fetch instead of hammering a dead DB.
         assert await fundamentals_stale("AAPL", "NASDAQ") is False
         assert await prices_stale("AAPL", "NASDAQ") is False
+
+
+# --------------------------------------------------- record_eval_result (WP-10)
+
+
+async def test_record_eval_result_roundtrip(sqlite_warehouse):
+    summary = {"n_tickers": 2, "judge_prefers_on_rate": 0.5}
+    rows = [
+        {"ticker": "AAPL", "action_on": "BUY", "action_off": "HOLD",
+         "score_on": 80, "score_off": 55, "cost_on": 0.06, "cost_off": 0.02,
+         "latency_on": 4.0, "latency_off": 1.5, "tokens_on": 150, "tokens_off": 60,
+         "judge_preferred": "on", "judge_agreement": False, "judge_confidence": 0.7},
+        {"ticker": "MSFT", "action_on": "BUY", "action_off": "BUY",
+         "score_on": 70, "score_off": 65, "judge_preferred": None},
+    ]
+    assert await record_eval_result("demo", summary, rows) is True
+    assert await _count(EvalResult) == 1
+    async with session_scope() as session:
+        row = (await session.execute(select(EvalResult))).scalar_one()
+    assert row.label == "demo"
+    assert row.summary == summary  # JSON roundtrip preserves the aggregate dict
+    assert row.pairs == rows       # per-ticker rows stored verbatim
+    assert row.created_at is not None
+
+
+async def test_record_eval_result_db_error_degrades(sqlite_warehouse, monkeypatch, caplog):
+    from src.warehouse import ingest as ingest_mod
+
+    def _boom():
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(ingest_mod, "session_scope", _boom)
+    with caplog.at_level("WARNING"):
+        assert await record_eval_result("demo", {"n_tickers": 0}, []) is False
+    assert any("record_eval_result" in r.message for r in caplog.records)

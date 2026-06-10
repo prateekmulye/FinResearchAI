@@ -365,6 +365,19 @@
   }
 }
 
+/* Hero-tile breathing (WP-10 verdict band): a very gentle scale-only oscillation
+   that signals "this is the live feed" WITHOUT the opacity dip of fin-breathe
+   (content must stay fully legible). Von Restorff isolation by motion. */
+@keyframes fin-breathe-tile {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.012);
+  }
+}
+
 @keyframes fin-aurora {
   0% {
     transform: translate3d(0, 0, 0) rotate(0deg);
@@ -447,6 +460,10 @@
 .animate-breathe {
   animation: fin-breathe 2600ms var(--ease-in-out) infinite;
 }
+.animate-breathe-tile {
+  animation: fin-breathe-tile 3200ms var(--ease-in-out) infinite;
+  will-change: transform;
+}
 .animate-accent-flash {
   animation: fin-accent-flash var(--duration-fast) var(--ease-spring);
 }
@@ -487,6 +504,7 @@
     scroll-behavior: auto !important;
   }
   .animate-breathe,
+  .animate-breathe-tile,
   .animate-accent-flash,
   .animate-signal-travel,
   .animate-shimmer,

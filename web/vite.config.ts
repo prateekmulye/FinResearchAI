@@ -14,6 +14,17 @@ export default defineConfig({
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
     },
+    // recharts pulls react-smooth + a nested react-is@18; without deduping,
+    // Vite's dep optimizer pre-bundles a SECOND React copy, so recharts' hooks
+    // (useRef) resolve to null and the chart crashes the route boundary. Pin a
+    // single React instance. (Caught only by live validation — mocked tests
+    // stub recharts away.)
+    dedupe: ["react", "react-dom"],
+  },
+  // Pre-bundle recharts and its React-touching transitive deps against the app's
+  // single React, so the dev optimizer never spins up a duplicate copy.
+  optimizeDeps: {
+    include: ["recharts", "react-smooth", "react-is"],
   },
   server: {
     port: 5173,

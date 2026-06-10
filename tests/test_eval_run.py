@@ -1,0 +1,125 @@
+# tests/test_eval_run.py
+"""WP-10 eval-run wiring: ``run_eval`` persists the A/B result to the warehouse
+(label + aggregate summary + per-ticker rows) AFTER writing the file reports,
+and keeps working exactly as before when the warehouse is disabled.
+
+``run_ab`` and ``judge_decision`` are monkeypatched on src.eval.run with the
+same canned shapes used by tests/test_eval_{harness,report}.py — no graph, no
+LLM, no network.
+"""
+from __future__ import annotations
+
+import json
+
+from sqlalchemy import select
+
+from src.eval import run as run_mod
+from src.eval.harness import PairedResult
+from src.eval.judge import JudgeVerdict
+from src.eval.report import _per_ticker_rows, aggregate
+from src.eval.run import run_eval
+from src.warehouse.db import session_scope
+from src.warehouse.models import EvalResult
+
+_PAIRS = [
+    PairedResult(
+        ticker="AAPL",
+        decision_on={"action": "BUY", "conviction": 0.6, "score": 80, "rationale": "x"},
+        decision_off={"action": "HOLD", "conviction": 0.6, "score": 55, "rationale": "y"},
+        metrics_on=[{"node": "n", "prompt_tokens": 100, "completion_tokens": 50,
+                     "latency_s": 4.0, "cost_usd": 0.06}],
+        metrics_off=[{"node": "n", "prompt_tokens": 40, "completion_tokens": 20,
+                      "latency_s": 1.5, "cost_usd": 0.02}],
+    ),
+    PairedResult(
+        ticker="MSFT",
+        decision_on={"action": "BUY", "conviction": 0.6, "score": 70, "rationale": "x"},
+        decision_off={"action": "BUY", "conviction": 0.6, "score": 65, "rationale": "y"},
+        metrics_on=[{"node": "n", "prompt_tokens": 100, "completion_tokens": 50,
+                     "latency_s": 3.0, "cost_usd": 0.04}],
+        metrics_off=[{"node": "n", "prompt_tokens": 40, "completion_tokens": 20,
+                      "latency_s": 1.5, "cost_usd": 0.02}],
+    ),
+]
+
+_VERDICTS = {
+    "AAPL": JudgeVerdict(preferred="on", agreement=False, reasoning="r", confidence=0.7),
+    "MSFT": JudgeVerdict(preferred="off", agreement=True, reasoning="r", confidence=0.6),
+}
+
+
+def _patch_eval_seams(monkeypatch) -> None:
+    async def fake_run_ab(tickers, *, investor_mode="Neutral", concurrency=3):
+        assert tickers == ["AAPL", "MSFT"]  # loaded from the tickers file
+        return list(_PAIRS)
+
+    async def fake_judge(*, ticker, context, decision_on, decision_off):
+        return _VERDICTS[ticker]
+
+    monkeypatch.setattr(run_mod, "run_ab", fake_run_ab)
+    monkeypatch.setattr(run_mod, "judge_decision", fake_judge)
+
+
+def _write_tickers(tmp_path) -> str:
+    path = tmp_path / "tickers.json"
+    path.write_text(
+        json.dumps({"tickers": [{"ticker": "AAPL"}, {"ticker": "MSFT"}]}),
+        encoding="utf-8",
+    )
+    return str(path)
+
+
+async def test_run_eval_persists_summary_and_pairs_to_warehouse(
+    sqlite_warehouse, monkeypatch, tmp_path
+):
+    _patch_eval_seams(monkeypatch)
+    await run_eval(_write_tickers(tmp_path), "wp10", 2, str(tmp_path))
+
+    async with session_scope() as session:
+        row = (await session.execute(select(EvalResult))).scalar_one()
+    assert row.label == "wp10"
+    assert row.summary == aggregate(_PAIRS, _VERDICTS)
+    assert row.pairs == _per_ticker_rows(_PAIRS, _VERDICTS)
+
+    # The persisted pairs ARE the dashboard rows: same shape as the JSON report.
+    report = json.loads((tmp_path / "report-wp10.json").read_text(encoding="utf-8"))
+    assert row.pairs == report["per_ticker"]
+    assert row.summary == report["summary"]
+    first = row.pairs[0]
+    for key in (
+        "ticker", "action_on", "action_off", "score_on", "score_off",
+        "cost_on", "cost_off", "latency_on", "latency_off",
+        "tokens_on", "tokens_off", "judge_preferred", "judge_agreement",
+        "judge_confidence",
+    ):
+        assert key in first, f"dashboard row missing {key}"
+    assert first["ticker"] == "AAPL"
+    assert first["judge_preferred"] == "on"
+
+
+async def test_run_eval_disabled_warehouse_still_writes_reports(monkeypatch, tmp_path):
+    # env_isolation (autouse) scrubbed DATABASE_URL -> warehouse disabled.
+    _patch_eval_seams(monkeypatch)
+    md_path = await run_eval(_write_tickers(tmp_path), "wp10", 2, str(tmp_path))
+
+    # File outputs unchanged and the run completes without a warehouse.
+    assert md_path == tmp_path / "report-wp10.md"
+    assert md_path.exists()
+    assert (tmp_path / "report-wp10.json").exists()
+
+
+async def test_run_eval_persistence_failure_never_breaks_the_run(
+    sqlite_warehouse, monkeypatch, tmp_path, caplog
+):
+    """A dead warehouse mid-persist degrades to a WARNING; reports still land."""
+    from src.warehouse import ingest as ingest_mod
+
+    def _boom():
+        raise RuntimeError("db down")
+
+    _patch_eval_seams(monkeypatch)
+    monkeypatch.setattr(ingest_mod, "session_scope", _boom)
+    with caplog.at_level("WARNING"):
+        md_path = await run_eval(_write_tickers(tmp_path), "wp10", 2, str(tmp_path))
+    assert md_path.exists()
+    assert any("record_eval_result" in r.message for r in caplog.records)

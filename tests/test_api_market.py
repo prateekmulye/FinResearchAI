@@ -256,6 +256,40 @@ def test_eval_results_empty_when_no_rows_stored(api_sqlite_warehouse):
         assert client.get("/api/eval/results").json() == {"results": []}
 
 
+def test_eval_results_serves_record_eval_result_rows(api_sqlite_warehouse):
+    """WP-10 end-to-end seam: a row persisted through the ingest write path
+    (what src.eval.run calls) comes back through GET /api/eval/results with the
+    full dashboard payload — label, created_at, summary, untruncated pairs."""
+    import asyncio
+
+    from src.warehouse.db import reset_engine
+    from src.warehouse.ingest import record_eval_result
+
+    summary = {"n_tickers": 1, "judge_prefers_on_rate": 1.0}
+    rows = [
+        {"ticker": "AAPL", "action_on": "BUY", "action_off": "HOLD",
+         "score_on": 80, "score_off": 55, "cost_on": 0.06, "cost_off": 0.02,
+         "latency_on": 4.0, "latency_off": 1.5, "tokens_on": 150, "tokens_off": 60,
+         "judge_preferred": "on", "judge_agreement": False, "judge_confidence": 0.7},
+    ]
+
+    async def _persist() -> None:
+        # Ingest memoizes an engine on THIS loop; reset before TestClient's
+        # lifespan creates its own (AsyncEngine has event-loop affinity).
+        assert await record_eval_result("wp10-e2e", summary, rows) is True
+        await reset_engine()
+
+    asyncio.run(_persist())
+    with TestClient(create_app()) as client:
+        body = client.get("/api/eval/results").json()
+    (result,) = body["results"]
+    assert result["label"] == "wp10-e2e"
+    assert result["summary"] == summary
+    assert result["pairs"] == rows
+    assert result["created_at"]
+    assert result["id"]
+
+
 def test_eval_results_503_when_warehouse_disabled():
     with TestClient(create_app()) as client:
         resp = client.get("/api/eval/results")

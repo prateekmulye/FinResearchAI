@@ -33,6 +33,7 @@ from src.warehouse.repos import (
     create_run,
     finish_run,
     insert_fundamentals,
+    save_eval_result,
     upsert_instrument,
     upsert_news,
 )
@@ -433,6 +434,32 @@ async def record_run_finish(
         _LOG.warning(
             "warehouse ingest: record_run_finish failed for %s (status=%s): %s",
             run_id, status, exc, exc_info=exc,
+        )
+        return False
+
+
+# ------------------------------------------------------- eval results (WP-10)
+
+
+async def record_eval_result(label: str, summary: dict, pairs: list[dict]) -> bool:
+    """Persist one debate A/B eval run: its label, aggregate ``summary`` dict,
+    and JSON-shaped per-ticker ``pairs`` rows (``src.eval.report._per_ticker_rows``
+    output — the same rows written to report-<label>.json). True on success.
+
+    Same module contract as everything above: warehouse disabled -> no-op False;
+    any DB error -> log WARNING and return False, NEVER raise — a dead warehouse
+    must not fail an eval run whose file outputs already landed.
+    """
+    if not warehouse_enabled():
+        return False
+    try:
+        async with session_scope() as session:
+            await save_eval_result(session, label, summary, pairs)
+        return True
+    except Exception as exc:
+        _LOG.warning(
+            "warehouse ingest: record_eval_result failed for label=%s: %s",
+            label, exc, exc_info=exc,
         )
         return False
 
