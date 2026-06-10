@@ -21,6 +21,8 @@ api = [
     "uvicorn[standard]==0.48.0",
     "sse-starlette==3.4.4",
     "httpx==0.28.1",
+    # WP-3: the scheduled collector runs inside the API process.
+    "apscheduler>=3.10,<4",
 ]
 db = [
     "sqlalchemy>=2.0,<3.0",

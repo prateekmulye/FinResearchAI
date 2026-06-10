@@ -293,6 +293,8 @@ def env_isolation(monkeypatch):
         "LANGSMITH_API_KEY",
         "DATABASE_URL",
         "DB_ECHO",
+        "COLLECTOR_ENABLED",
+        "COLLECTOR_INTERVAL_HOURS",
     ):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("RUN_LIVE", "0")

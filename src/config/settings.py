@@ -55,6 +55,12 @@ class Settings(BaseSettings):
     database_url: str | None = None
     db_echo: bool = False
 
+    # Collector (WP-3, additive): in-process scheduled refresh of watched
+    # instruments (prices + fundamentals). Off by default; only ever started
+    # when the warehouse is enabled too.
+    collector_enabled: bool = False
+    collector_interval_hours: int = 24
+
     def apply_model_yaml(self, tiers: dict[str, dict[str, Any]] | None = None) -> "Settings":
         """Fill model/temperature from models.yaml ONLY where env didn't override."""
         tiers = tiers if tiers is not None else load_model_tiers()

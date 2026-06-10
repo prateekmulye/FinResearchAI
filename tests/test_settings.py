@@ -22,12 +22,14 @@ def test_load_model_tiers_reads_yaml(tmp_path):
 # event that breaks downstream WPs, so assert the full set explicitly.
 # WP-1 (flagship elevation, spec-sanctioned ADDITIVE change): database_url + db_echo.
 # WP-2 (spec-sanctioned REMOVAL): chroma_dir is gone with the Chroma backend.
+# WP-3 (ADDITIVE): collector_enabled + collector_interval_hours (scheduled collector).
 _CONTRACT_FIELDS = {
     "llm_provider", "llm_base_url", "ollama_api_key", "firecrawl_api_key",
     "quick_model", "deep_model", "quick_temperature", "deep_temperature",
     "research_debate_rounds", "risk_debate_rounds", "debate_mode",
     "embedding_model", "runs_dir", "langsmith_enabled",
     "database_url", "db_echo",
+    "collector_enabled", "collector_interval_hours",
 }
 
 
@@ -48,6 +50,17 @@ def test_settings_exposes_all_contract_fields(monkeypatch):
     # WP-1 warehouse fields: disabled by default (no DATABASE_URL -> warehouse off).
     assert s.database_url is None
     assert s.db_echo is False
+    # WP-3 collector fields: opt-in, daily by default.
+    assert s.collector_enabled is False
+    assert s.collector_interval_hours == 24
+
+
+def test_settings_collector_reads_env(monkeypatch):
+    monkeypatch.setenv("COLLECTOR_ENABLED", "true")
+    monkeypatch.setenv("COLLECTOR_INTERVAL_HOURS", "6")
+    s = Settings(_env_file=None)
+    assert s.collector_enabled is True
+    assert s.collector_interval_hours == 6
 
 
 def test_settings_defaults_without_env(monkeypatch):
