@@ -20,11 +20,13 @@ def test_load_model_tiers_reads_yaml(tmp_path):
 
 # COORDINATION §1 frozen Settings fields. A rename/removal here is a coordination
 # event that breaks downstream WPs, so assert the full set explicitly.
+# WP-1 (flagship elevation, spec-sanctioned ADDITIVE change): database_url + db_echo.
 _CONTRACT_FIELDS = {
     "llm_provider", "llm_base_url", "ollama_api_key", "firecrawl_api_key",
     "quick_model", "deep_model", "quick_temperature", "deep_temperature",
     "research_debate_rounds", "risk_debate_rounds", "debate_mode",
     "chroma_dir", "embedding_model", "runs_dir", "langsmith_enabled",
+    "database_url", "db_echo",
 }
 
 
@@ -41,6 +43,9 @@ def test_settings_exposes_all_contract_fields(monkeypatch):
     assert s.embedding_model == "BAAI/bge-small-en-v1.5"
     assert s.runs_dir == "runs"
     assert s.langsmith_enabled is False
+    # WP-1 warehouse fields: disabled by default (no DATABASE_URL -> warehouse off).
+    assert s.database_url is None
+    assert s.db_echo is False
 
 
 def test_settings_defaults_without_env(monkeypatch):
