@@ -1,0 +1,293 @@
+@import "tailwindcss";
+
+/* Self-hosted variable fonts — no CDN. Inter = UI/display, JetBrains Mono = data. */
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/jetbrains-mono";
+
+/* Dark is the only theme; we still scope under .dark for forward-compat. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* =========================================================================
+   DESIGN TOKENS — "Glass-SaaS shell x Terminal data surfaces"
+   Every token here is documented in web/DESIGN.md with usage rules.
+   Palette is OKLCH so the luminous signal glow stays perceptually uniform
+   across the blurred glass layers (NotebookLM, AAA on data strings).
+   ========================================================================= */
+@theme {
+  /* ---- Type families ---- */
+  --font-sans:
+    "Inter Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono:
+    "JetBrains Mono Variable", ui-monospace, "SF Mono", "Cascadia Code", monospace;
+
+  /* ---- Type scale: 1.25 Major Third, 16px base ---- */
+  --text-2xs: 0.6875rem; /* 11px — dense terminal labels */
+  --text-2xs--line-height: 1rem;
+  --text-xs: 0.75rem; /* 12px — metadata, captions */
+  --text-xs--line-height: 1.1rem;
+  --text-sm: 0.875rem; /* 14px — UI default / nav */
+  --text-sm--line-height: 1.4rem;
+  --text-base: 1rem; /* 16px — body floor */
+  --text-base--line-height: 1.55rem;
+  --text-lg: 1.25rem;
+  --text-lg--line-height: 1.7rem;
+  --text-xl: 1.5625rem;
+  --text-xl--line-height: 1.9rem;
+  --text-2xl: 1.953rem;
+  --text-2xl--line-height: 2.25rem;
+  --text-3xl: 2.441rem;
+  --text-3xl--line-height: 2.6rem;
+  --text-4xl: 3.052rem;
+  --text-4xl--line-height: 3.1rem;
+
+  /* ---- Base surfaces (asphalt blue-black, 4-step elevation) ---- */
+  --color-base: oklch(12% 0.015 260); /* page background */
+  --color-surface-1: oklch(15.5% 0.016 260); /* resting card */
+  --color-surface-2: oklch(19% 0.018 260); /* raised card / input */
+  --color-surface-3: oklch(24% 0.02 260); /* popover / active row */
+  --color-line: oklch(100% 0 0 / 8%); /* hairline divider */
+  --color-line-strong: oklch(100% 0 0 / 14%);
+
+  /* ---- Glass (the SaaS shell) ---- */
+  --color-glass: oklch(100% 0 0 / 5%); /* glass fill */
+  --color-glass-strong: oklch(100% 0 0 / 8%); /* nav / floating glass */
+  --color-glass-border: oklch(100% 0 0 / 12%);
+
+  /* ---- Text ---- */
+  --color-fg: oklch(96% 0.008 260); /* primary, >12:1 on base */
+  --color-fg-muted: oklch(74% 0.012 260); /* secondary */
+  --color-fg-subtle: oklch(58% 0.012 260); /* tertiary / disabled */
+
+  /* ---- Functional accent (azure): links, focus ring, caret, active signal ---- */
+  --color-accent: oklch(70% 0.13 245);
+  --color-accent-strong: oklch(78% 0.14 245);
+  --color-accent-fg: oklch(16% 0.03 260); /* text on accent fills */
+
+  /* ---- Signal colors (Bloomberg energy) — meaning-bearing, AAA on base ----
+     Reused across both the decision verdict and the live debate personas. */
+  --color-bull: oklch(72% 0.15 152); /* BUY / bull / positive / healthy */
+  --color-bull-dim: oklch(72% 0.15 152 / 14%);
+  --color-bear: oklch(64% 0.19 22); /* SELL / bear / negative */
+  --color-bear-dim: oklch(64% 0.19 22 / 16%);
+  --color-hold: oklch(80% 0.15 78); /* HOLD / amber / warn / degraded */
+  --color-hold-dim: oklch(80% 0.15 78 / 14%);
+
+  /* Persona tints for the risk debate */
+  --color-conservative: oklch(70% 0.1 230); /* cool, measured */
+  --color-aggressive: oklch(74% 0.16 35); /* hot, risk-on */
+
+  /* ---- Radius scale ---- */
+  --radius-xs: 0.25rem;
+  --radius-sm: 0.375rem;
+  --radius-md: 0.625rem;
+  --radius-lg: 0.875rem;
+  --radius-xl: 1.25rem;
+  --radius-2xl: 1.75rem;
+
+  /* ---- Blur scale (glass depth) ---- */
+  --blur-glass: 16px; /* standard shell glass */
+  --blur-glass-strong: 28px; /* floating nav / modal */
+
+  /* ---- Elevation (soft, colored-by-base, never pure black) ---- */
+  --shadow-glass:
+    0 1px 0 0 oklch(100% 0 0 / 6%) inset, 0 8px 24px -12px oklch(0% 0 0 / 55%);
+  --shadow-raised:
+    0 1px 0 0 oklch(100% 0 0 / 4%) inset, 0 16px 40px -20px oklch(0% 0 0 / 60%);
+  --shadow-glow-accent:
+    0 0 0 1px oklch(70% 0.13 245 / 40%), 0 0 24px -4px oklch(70% 0.13 245 / 35%);
+
+  /* ---- Motion: durations + easings (shared "physics" language) ---- */
+  --ease-spring: cubic-bezier(0.16, 1, 0.3, 1); /* glass settle / drawer */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --duration-micro: 120ms; /* hover / press (< Doherty 50ms perception start) */
+  --duration-fast: 200ms; /* the SSE "luminous accent" flash */
+  --duration-base: 320ms; /* page + card transitions (< 400ms Doherty) */
+  --duration-slow: 600ms; /* onion-peel drawer reveal */
+}
+
+/* Motion spring used by JS (Motion lib) mirrors the CSS easing language.
+   Exposed as plain CSS vars so JS can read them for a single source of truth. */
+:root {
+  --spring-stiffness: 150;
+  --spring-damping: 15;
+  --spring-mass: 0.1;
+}
+
+/* =========================================================================
+   BASE LAYER
+   ========================================================================= */
+@layer base {
+  * {
+    border-color: var(--color-line);
+  }
+
+  html {
+    color-scheme: dark;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    margin: 0;
+    min-height: 100dvh;
+    background-color: var(--color-base);
+    color: var(--color-fg);
+    font-family: var(--font-sans);
+    font-size: var(--text-base);
+    line-height: var(--text-base--line-height);
+    font-feature-settings: "cv11", "ss01";
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* All numerics line up: tabular figures kill horizontal jitter on SSE feeds. */
+  .font-mono,
+  code,
+  kbd,
+  samp {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum", "zero";
+  }
+
+  /* Visible, on-brand focus ring everywhere (WCAG 2.4.7) */
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+    border-radius: var(--radius-xs);
+  }
+
+  ::selection {
+    background: oklch(70% 0.13 245 / 35%);
+    color: var(--color-fg);
+  }
+
+  /* Thin, glassy scrollbars to match the shell */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-line-strong) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: var(--color-line-strong);
+    border-radius: 999px;
+    border: 3px solid transparent;
+    background-clip: padding-box;
+  }
+}
+
+/* =========================================================================
+   COMPONENT UTILITIES (the glass + terminal primitives)
+   ========================================================================= */
+@layer components {
+  /* Glass panel — the SaaS shell surface. Onion-peel containers compose on top. */
+  .glass {
+    background: var(--color-glass);
+    backdrop-filter: blur(var(--blur-glass)) saturate(1.4);
+    -webkit-backdrop-filter: blur(var(--blur-glass)) saturate(1.4);
+    border: 1px solid var(--color-glass-border);
+    box-shadow: var(--shadow-glass);
+  }
+  .glass-strong {
+    background: var(--color-glass-strong);
+    backdrop-filter: blur(var(--blur-glass-strong)) saturate(1.5);
+    -webkit-backdrop-filter: blur(var(--blur-glass-strong)) saturate(1.5);
+    border: 1px solid var(--color-glass-border);
+  }
+
+  /* Terminal tile — the dense data surface that lives INSIDE a glass frame.
+     Subtle inner rule + mono context. Restrict backdrop-filter to the shell;
+     tiles stay flat for GPU budget. */
+  .terminal-tile {
+    background: var(--color-surface-1);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-md);
+    font-family: var(--font-mono);
+  }
+
+  /* The texture glue: one fixed fractal-noise overlay over the whole app.
+     ~3.5% opacity reads as CRT phosphor + paper, never as visible static. */
+  .grain::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    pointer-events: none;
+    opacity: 0.035;
+    filter: url(#fin-grain);
+    /* feTurbulence fills via the filter; a transparent box is enough to sample. */
+    background: transparent;
+    mix-blend-mode: overlay;
+  }
+}
+
+/* =========================================================================
+   KEYFRAMES — referenced by the shell + future cockpit
+   ========================================================================= */
+@keyframes fin-breathe {
+  0%,
+  100% {
+    opacity: 0.8;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.05);
+  }
+}
+
+/* The SSE "Luminous Accent": load-before-release dip then snappy pulse.
+   Used when a node_complete lands on its pipeline node. */
+@keyframes fin-accent-flash {
+  0% {
+    transform: scale(0.95);
+  }
+  60% {
+    transform: scale(1.1);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes fin-aurora {
+  0% {
+    transform: translate3d(0, 0, 0) rotate(0deg);
+  }
+  100% {
+    transform: translate3d(0, 0, 0) rotate(360deg);
+  }
+}
+
+@keyframes fin-marching-ants {
+  to {
+    stroke-dashoffset: -16;
+  }
+}
+
+.animate-breathe {
+  animation: fin-breathe 2600ms var(--ease-in-out) infinite;
+}
+.animate-accent-flash {
+  animation: fin-accent-flash var(--duration-fast) var(--ease-spring);
+}
+
+/* =========================================================================
+   REDUCED MOTION — global unwind (WCAG 2.3.3 / vestibular safety)
+   ========================================================================= */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .animate-breathe,
+  .animate-accent-flash {
+    animation: none !important;
+  }
+}
