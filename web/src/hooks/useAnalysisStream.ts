@@ -31,6 +31,13 @@ export interface NodeRun {
   completedAt: number | null;
   /** Concatenated token text streamed for this node (reporter, etc.). */
   text: string;
+  /**
+   * The structured state delta this node emitted on `node_complete` (the raw
+   * LangGraph state fragment — analyst_reports, research_debate, trade_proposal,
+   * risk_debate, final_decision, run_metrics, …). The cockpit's intelligence
+   * panels decode this; empty until the node completes.
+   */
+  delta: Record<string, unknown>;
 }
 
 export interface AnalysisDone {
@@ -49,6 +56,8 @@ export interface AnalysisStreamState {
   nodes: Record<string, NodeRun>;
   done: AnalysisDone | null;
   error: string | null;
+  /** HTTP status behind the error, when one exists (429 drives quota UX). */
+  errorStatus: number | null;
 }
 
 const initialState: AnalysisStreamState = {
@@ -60,12 +69,13 @@ const initialState: AnalysisStreamState = {
   nodes: {},
   done: null,
   error: null,
+  errorStatus: null,
 };
 
 type Action =
   | { kind: "connect" }
   | { kind: "event"; event: AnalysisEvent }
-  | { kind: "error"; message: string }
+  | { kind: "error"; message: string; status?: number | null }
   | { kind: "abort" }
   | { kind: "reset" };
 
@@ -76,7 +86,7 @@ function ensureNode(state: AnalysisStreamState, node: string): AnalysisStreamSta
     order: [...state.order, node],
     nodes: {
       ...state.nodes,
-      [node]: { node, startedAt: Date.now(), completedAt: null, text: "" },
+      [node]: { node, startedAt: Date.now(), completedAt: null, text: "", delta: {} },
     },
   };
 }
@@ -88,7 +98,12 @@ function reducer(state: AnalysisStreamState, action: Action): AnalysisStreamStat
     case "connect":
       return { ...initialState, phase: "connecting" };
     case "error":
-      return { ...state, phase: "error", error: action.message };
+      return {
+        ...state,
+        phase: "error",
+        error: action.message,
+        errorStatus: action.status ?? null,
+      };
     case "abort":
       // A user-stopped run lands back at rest (the form recovers its Run
       // affordance); a terminal done/error phase is never clobbered.
@@ -115,7 +130,13 @@ function reducer(state: AnalysisStreamState, action: Action): AnalysisStreamStat
             ...withNode,
             nodes: {
               ...withNode.nodes,
-              [e.node]: { ...existing, completedAt: Date.now() },
+              [e.node]: {
+                ...existing,
+                completedAt: Date.now(),
+                // Merge so a node that completes in multiple updates (or that
+                // also streamed tokens) keeps every key it ever reported.
+                delta: { ...existing.delta, ...(e.delta ?? {}) },
+              },
             },
           };
         }
@@ -144,7 +165,8 @@ function reducer(state: AnalysisStreamState, action: Action): AnalysisStreamStat
             },
           };
         case "error":
-          return { ...state, phase: "error", error: e.message };
+          // In-stream failure — there is no HTTP status behind it.
+          return { ...state, phase: "error", error: e.message, errorStatus: null };
         default:
           return state;
       }
@@ -226,6 +248,7 @@ export function useAnalysisStream(): UseAnalysisStream {
         dispatch({
           kind: "error",
           message: "Rate limited — daily live-run quota reached. Try a replay.",
+          status: 429,
         });
         return;
       }
@@ -233,6 +256,7 @@ export function useAnalysisStream(): UseAnalysisStream {
         dispatch({
           kind: "error",
           message: new ApiError(`analyze -> ${res.status}`, res.status).message,
+          status: res.status,
         });
         return;
       }

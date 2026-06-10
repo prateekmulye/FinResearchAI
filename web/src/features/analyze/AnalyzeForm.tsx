@@ -74,10 +74,14 @@ export function AnalyzeForm({
               spellCheck={false}
               maxLength={15}
               className={cn(
-                "h-11 w-full rounded-lg pl-9 pr-3",
-                "bg-[var(--color-surface-2)] font-mono text-base uppercase tracking-wide text-[var(--color-fg)]",
-                "border border-[var(--color-line)] placeholder:text-[var(--color-fg-subtle)] placeholder:normal-case placeholder:tracking-normal",
-                "transition-colors focus:border-[var(--color-accent)] focus:outline-none focus-visible:outline-none",
+                // Input-weight polish: taller, heavier mono fill, and a focus
+                // ring that lights the field as "the live command line" rather
+                // than a passive text box.
+                "h-12 w-full rounded-lg pl-9 pr-3",
+                "bg-[var(--color-surface-2)] font-mono text-lg font-medium uppercase tracking-wide text-[var(--color-fg)]",
+                "border border-[var(--color-line-strong)] placeholder:text-base placeholder:font-normal placeholder:text-[var(--color-fg-subtle)] placeholder:normal-case placeholder:tracking-normal",
+                "shadow-[inset_0_1px_0_0_oklch(100%_0_0/4%)] transition-[border-color,box-shadow] duration-[120ms]",
+                "focus:border-[var(--color-accent)] focus:shadow-[var(--shadow-glow-accent)] focus:outline-none focus-visible:outline-none",
               )}
             />
           </div>

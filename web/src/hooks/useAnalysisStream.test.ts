@@ -200,5 +200,35 @@ describe("useAnalysisStream — stream draining without a terminal event", () =>
     });
     expect(result.current.state.phase).toBe("error");
     expect(result.current.state.error).toBe("boom");
+    // An in-stream error has no HTTP status — never mistaken for a quota 429.
+    expect(result.current.state.errorStatus).toBeNull();
+  });
+});
+
+describe("useAnalysisStream — HTTP error status", () => {
+  function renderHttpError(status: number) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: false, status, body: null }) as unknown as Response),
+    );
+    return renderHook(() => useAnalysisStream());
+  }
+
+  it("records 429 in errorStatus so quota detection is status-driven", async () => {
+    const { result } = renderHttpError(429);
+    await act(async () => {
+      await result.current.start({ ticker: "AAPL", investorMode: "Neutral" });
+    });
+    expect(result.current.state.phase).toBe("error");
+    expect(result.current.state.errorStatus).toBe(429);
+  });
+
+  it("records a non-quota HTTP status (e.g. 500) without claiming quota", async () => {
+    const { result } = renderHttpError(500);
+    await act(async () => {
+      await result.current.start({ ticker: "AAPL", investorMode: "Neutral" });
+    });
+    expect(result.current.state.phase).toBe("error");
+    expect(result.current.state.errorStatus).toBe(500);
   });
 });
