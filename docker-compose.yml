@@ -1,0 +1,21 @@
+# Dev-only warehouse database (WP-1). App + Caddy services arrive in WP-11.
+# Start:   docker compose up -d db
+# Connect: DATABASE_URL=postgresql+asyncpg://finresearch:finresearch@localhost:5433/finresearch
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: finresearch
+      POSTGRES_PASSWORD: finresearch
+      POSTGRES_DB: finresearch
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U finresearch"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+volumes:
+  pgdata:

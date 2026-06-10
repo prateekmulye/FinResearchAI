@@ -63,12 +63,14 @@ namespaces = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# Deselect the live (network) test by default; CI and local runs stay offline.
-# --strict-markers turns any unregistered marker into an error (catches typos).
-addopts = "-v -m \"not live\" --strict-markers"
+# Deselect the live (network) and db (Postgres) tests by default; CI and local
+# runs stay offline. --strict-markers turns any unregistered marker into an
+# error (catches typos).
+addopts = "-v -m \"not live and not db\" --strict-markers"
 asyncio_mode = "auto"
 markers = [
     "live: hits a real external API; skipped unless RUN_LIVE=1 (deselect with '-m \"not live\"')",
+    "db: requires a running Postgres with pgvector (DATABASE_URL); deselected by default",
 ]
 
 [tool.ruff]
