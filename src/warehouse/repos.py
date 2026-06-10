@@ -9,6 +9,7 @@ sqlite) chosen from ``session.bind.dialect.name``.
 from __future__ import annotations
 
 import hashlib
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, Callable
 
@@ -314,6 +315,7 @@ async def finish_run(
     final_decision: dict[str, Any] | None = None,
     report: str | None = None,
     metrics: Any | None = None,
+    embedding: list[float] | None = None,
 ) -> Run | None:
     run = await session.get(Run, run_id)
     if run is None:
@@ -326,6 +328,10 @@ async def finish_run(
         run.report = report
     if metrics is not None:
         run.metrics = metrics
+    if embedding is not None:
+        # WP-9: summary vector for /api/search (computed by the caller OUTSIDE
+        # any DB session — model inference must not hold a transaction open).
+        run.embedding = embedding
     await session.flush()
     return run
 
@@ -431,6 +437,127 @@ async def latest_finished_run(
         stmt = stmt.where(Run.started_at >= cutoff)
     result = await session.execute(stmt)
     return result.scalars().first()
+
+
+# ----------------------------------------------------------------- search (WP-9)
+
+
+class UnsupportedDialectError(RuntimeError):
+    """``semantic_search`` requires PostgreSQL + pgvector; raised on any other
+    dialect so the caller can fall back to ``keyword_search``."""
+
+
+@dataclass(frozen=True)
+class SearchHit:
+    """One /api/search result row, shared by the semantic and keyword paths."""
+
+    kind: str  # "news" | "run"
+    ref: str  # news url | run_id
+    ticker: str
+    title: str
+    snippet: str | None
+    score: float | None  # cosine distance (semantic; lower = closer) | None (keyword)
+    ts: datetime
+
+
+_RUN_SNIPPET_CHARS = 200
+
+
+def _news_hit(item: NewsItem, ticker: str, score: float | None) -> SearchHit:
+    return SearchHit(
+        kind="news", ref=item.url, ticker=ticker, title=item.title,
+        snippet=item.snippet, score=score, ts=item.ts,
+    )
+
+
+def _run_hit(run: Run, score: float | None) -> SearchHit:
+    decision = run.final_decision if isinstance(run.final_decision, dict) else {}
+    action = decision.get("action")
+    title = f"{run.ticker} run — {action}" if action else f"{run.ticker} run"
+    snippet = (run.report or "")[:_RUN_SNIPPET_CHARS] or None
+    return SearchHit(
+        kind="run", ref=run.run_id, ticker=run.ticker, title=title,
+        snippet=snippet, score=score, ts=run.started_at,
+    )
+
+
+async def semantic_search(
+    session: AsyncSession, query_vec: list[float], *, limit: int = 20
+) -> list[SearchHit]:
+    """Nearest news + runs by cosine distance to ``query_vec`` (PostgreSQL only).
+
+    UNION-style: two per-table queries (each ``ORDER BY embedding <=> :q LIMIT
+    n``, so both can use their HNSW cosine index; rows with NULL embeddings are
+    skipped), merged nearest-first in Python and capped at ``limit``. On any
+    non-PostgreSQL dialect raises ``UnsupportedDialectError`` — callers fall
+    back to ``keyword_search``.
+    """
+    bind = getattr(session, "bind", None)
+    if bind is None or bind.dialect.name != "postgresql":
+        raise UnsupportedDialectError(
+            "semantic_search requires PostgreSQL + pgvector; use keyword_search"
+        )
+    news_dist = NewsItem.embedding.cosine_distance(query_vec).label("distance")
+    news_stmt = (
+        select(NewsItem, Instrument.ticker, news_dist)
+        .join(Instrument, Instrument.id == NewsItem.instrument_id)
+        .where(NewsItem.embedding.is_not(None))
+        .order_by(news_dist)
+        .limit(limit)
+    )
+    run_dist = Run.embedding.cosine_distance(query_vec).label("distance")
+    run_stmt = (
+        select(Run, run_dist)
+        .where(Run.embedding.is_not(None))
+        .order_by(run_dist)
+        .limit(limit)
+    )
+    # Both queries SELECT the distance and skip NULL embeddings, so every hit
+    # here carries a float score (SearchHit.score is Optional only for the
+    # keyword path) — sort (distance, hit) pairs, nearest first.
+    scored = [
+        (float(distance), _news_hit(item, ticker, float(distance)))
+        for item, ticker, distance in (await session.execute(news_stmt)).all()
+    ]
+    scored += [
+        (float(distance), _run_hit(run, float(distance)))
+        for run, distance in (await session.execute(run_stmt)).all()
+    ]
+    scored.sort(key=lambda pair: pair[0])
+    return [hit for _, hit in scored[:limit]]
+
+
+async def keyword_search(
+    session: AsyncSession, q: str, *, limit: int = 20
+) -> list[SearchHit]:
+    """Dialect-agnostic ILIKE fallback: news title/snippet + run ticker/report.
+
+    Newest-first (news ts / run started_at) across both kinds, capped at
+    ``limit``. Hits carry ``score=None`` — there is no distance to report.
+    """
+    pattern = f"%{q}%"
+    news_stmt = (
+        select(NewsItem, Instrument.ticker)
+        .join(Instrument, Instrument.id == NewsItem.instrument_id)
+        .where(or_(NewsItem.title.ilike(pattern), NewsItem.snippet.ilike(pattern)))
+        .order_by(NewsItem.ts.desc(), NewsItem.id.desc())
+        .limit(limit)
+    )
+    run_stmt = (
+        select(Run)
+        .where(or_(Run.ticker.ilike(pattern), Run.report.ilike(pattern)))
+        .order_by(Run.started_at.desc(), Run.run_id.desc())
+        .limit(limit)
+    )
+    hits = [
+        _news_hit(item, ticker, None)
+        for item, ticker in (await session.execute(news_stmt)).all()
+    ]
+    hits += [
+        _run_hit(run, None) for run in (await session.execute(run_stmt)).scalars()
+    ]
+    hits.sort(key=lambda h: h.ts, reverse=True)
+    return hits[:limit]
 
 
 # --------------------------------------------------------------------- verdicts

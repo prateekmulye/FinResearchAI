@@ -6,18 +6,22 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from sqlalchemy import func, select
 
 from src.warehouse.db import session_scope
 from src.warehouse.ingest import (
+    _run_summary_text,
     ensure_instrument,
     fundamentals_stale,
     prices_stale,
     record_fundamentals,
     record_news,
+    record_run_finish,
+    record_run_start,
     refresh_prices,
 )
-from src.warehouse.models import FundamentalsSnapshot, Instrument, NewsItem, PriceBar
+from src.warehouse.models import FundamentalsSnapshot, Instrument, NewsItem, PriceBar, Run
 
 NOW = datetime(2026, 6, 10, 12, 0, 0, tzinfo=UTC)
 
@@ -171,6 +175,140 @@ async def test_record_news_skips_items_without_url(sqlite_warehouse):
     items = [{"title": "no url"}, {"title": "ok", "url": "https://x.com/ok"}]
     assert await record_news("AAPL", "NASDAQ", "america", items) == 1
     assert await _count(NewsItem) == 1
+
+
+# ------------------------------------------------- WP-9 embedding write path
+
+
+class _BoomEmbedder:
+    def embed(self, texts):
+        raise RuntimeError("onnx exploded")
+
+    def embed_one(self, text):
+        raise RuntimeError("onnx exploded")
+
+
+async def _news_rows() -> dict[str, NewsItem]:
+    async with session_scope() as session:
+        return {r.title: r for r in (await session.execute(select(NewsItem))).scalars()}
+
+
+async def test_record_news_stores_embeddings_when_embedder_available(
+    sqlite_warehouse, warehouse_fake_embedder
+):
+    items = [
+        {"title": "Apple beats", "url": "https://x.com/a", "snippet": "strong q"},
+        {"title": "Apple guidance", "url": "https://x.com/b"},  # no snippet
+    ]
+    assert await record_news("AAPL", "NASDAQ", "america", items) == 2
+    rows = await _news_rows()
+    # Embedded text is title (+ snippet when present, joined); JSON-text roundtrip
+    # on sqlite must come back as list[float] of the model dimension.
+    expected_a = warehouse_fake_embedder.vector("Apple beats\nstrong q")
+    expected_b = warehouse_fake_embedder.vector("Apple guidance")
+    for title, expected in (("Apple beats", expected_a), ("Apple guidance", expected_b)):
+        embedding = rows[title].embedding
+        assert isinstance(embedding, list)
+        assert len(embedding) == 384
+        assert all(isinstance(x, float) for x in embedding)
+        assert embedding == expected
+    # One batched embed call, outside the session (can't assert timing, but batching).
+    assert warehouse_fake_embedder.calls == [["Apple beats\nstrong q", "Apple guidance"]]
+
+
+async def test_record_news_without_embedder_stores_rows_with_null_embedding(
+    sqlite_warehouse,
+):
+    # autouse no_real_embedder pins the seam to None.
+    items = [{"title": "Apple beats", "url": "https://x.com/a", "snippet": "s"}]
+    assert await record_news("AAPL", "NASDAQ", "america", items) == 1
+    rows = await _news_rows()
+    assert rows["Apple beats"].embedding is None
+
+
+async def test_record_news_embedder_failure_still_stores_rows(sqlite_warehouse):
+    from src.warehouse.embeddings import set_embedder_for_testing
+
+    set_embedder_for_testing(_BoomEmbedder())
+    items = [{"title": "Apple beats", "url": "https://x.com/a"}]
+    assert await record_news("AAPL", "NASDAQ", "america", items) == 1
+    rows = await _news_rows()
+    assert rows["Apple beats"].embedding is None
+
+
+async def _run_row(run_id: str) -> Run:
+    async with session_scope() as session:
+        return (
+            await session.execute(select(Run).where(Run.run_id == run_id))
+        ).scalar_one()
+
+
+async def test_record_run_finish_embeds_finished_run_with_report(
+    sqlite_warehouse, warehouse_fake_embedder
+):
+    decision = {"action": "BUY", "conviction": 0.8, "score": 78, "rationale": "upside"}
+    report = "# AAPL\n" + "body " * 400  # > 1000 chars: summary truncates
+    await record_run_start("run-emb-1", "AAPL", "on")
+    assert await record_run_finish(
+        "run-emb-1", status="finished", final_decision=decision, report=report
+    ) is True
+    run = await _run_row("run-emb-1")
+    expected = warehouse_fake_embedder.vector(_run_summary_text(report, decision))
+    assert run.embedding == expected
+    assert len(run.embedding) == 384
+    # The embedded summary is bounded: ~1000 report chars + decision parts.
+    embedded_text = warehouse_fake_embedder.calls[-1][0]
+    assert report[:1000] in embedded_text
+    assert "BUY" in embedded_text and "upside" in embedded_text
+    assert len(embedded_text) < 1200
+
+
+@pytest.mark.parametrize(
+    ("status", "report"),
+    [("error", "partial report"), ("aborted", None), ("finished", None)],
+)
+async def test_record_run_finish_skips_embedding_unless_finished_with_report(
+    sqlite_warehouse, warehouse_fake_embedder, status, report
+):
+    run_id = f"run-noemb-{status}-{bool(report)}"
+    await record_run_start(run_id, "AAPL", "on")
+    assert await record_run_finish(run_id, status=status, report=report) is True
+    run = await _run_row(run_id)
+    assert run.embedding is None
+    assert warehouse_fake_embedder.calls == []
+
+
+async def test_record_run_finish_without_embedder_still_finishes(sqlite_warehouse):
+    await record_run_start("run-emb-none", "AAPL", "on")
+    assert await record_run_finish(
+        "run-emb-none", status="finished", report="done report"
+    ) is True
+    run = await _run_row("run-emb-none")
+    assert run.status == "finished"
+    assert run.embedding is None
+
+
+async def test_record_run_finish_embedder_failure_still_finishes(sqlite_warehouse):
+    from src.warehouse.embeddings import set_embedder_for_testing
+
+    set_embedder_for_testing(_BoomEmbedder())
+    await record_run_start("run-emb-boom", "AAPL", "on")
+    assert await record_run_finish(
+        "run-emb-boom", status="finished", report="done report"
+    ) is True
+    run = await _run_row("run-emb-boom")
+    assert run.status == "finished"
+    assert run.embedding is None
+
+
+def test_run_summary_text_truncates_and_includes_decision():
+    text = _run_summary_text("R" * 5000, {"action": "SELL", "rationale": "overvalued"})
+    assert text.startswith("R" * 1000)
+    assert "R" * 1001 not in text
+    assert "SELL" in text
+    assert "overvalued" in text
+    # No decision -> just the truncated report.
+    assert _run_summary_text("short report", None) == "short report"
 
 
 # -------------------------------------------------------------- refresh_prices

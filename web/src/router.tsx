@@ -21,6 +21,9 @@ const RunDetailPage = lazy(() =>
 const MarketPage = lazy(() =>
   import("@/pages/MarketPage").then((m) => ({ default: m.MarketPage })),
 );
+const DossierPage = lazy(() =>
+  import("@/pages/DossierPage").then((m) => ({ default: m.DossierPage })),
+);
 const EvalPage = lazy(() =>
   import("@/pages/EvalPage").then((m) => ({ default: m.EvalPage })),
 );
@@ -37,6 +40,7 @@ export const router = createBrowserRouter([
       { path: "library", element: <LibraryPage /> },
       { path: "library/:runId", element: <RunDetailPage /> },
       { path: "market", element: <MarketPage /> },
+      { path: "market/:ticker", element: <DossierPage /> },
       { path: "eval", element: <EvalPage /> },
       { path: "*", element: <NotFoundPage /> },
     ],

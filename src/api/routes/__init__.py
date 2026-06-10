@@ -4,6 +4,7 @@
   analyze.py       POST /api/analyze                       (SSE graph stream)
   library.py       GET  /api/library, GET /api/runs/{id}   (Research Library)
   market.py        GET  /api/market/...                    (Market Explorer reads)
+  search.py        GET  /api/search                        (semantic/keyword search, WP-9)
   eval_results.py  GET  /api/eval/results                  (debate A/B results)
   quota.py         GET  /api/quota                         (demo-guard status)
 

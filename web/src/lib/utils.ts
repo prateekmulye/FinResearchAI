@@ -27,6 +27,46 @@ export function formatInt(value: number | null | undefined): string {
   return value.toLocaleString("en-US");
 }
 
+/** Abbreviate a large number to a compact $-prefixed magnitude (market cap):
+ *  1.23e12 -> "$1.23T", 4.5e9 -> "$4.50B", 8.1e6 -> "$8.10M". Sub-million
+ *  values fall through to grouped dollars so small caps still read precisely. */
+export function formatCompactUsd(value: number | null | undefined): string {
+  if (value == null || Number.isNaN(value)) return "—";
+  const abs = Math.abs(value);
+  const sign = value < 0 ? "-" : "";
+  const units: [number, string][] = [
+    [1e12, "T"],
+    [1e9, "B"],
+    [1e6, "M"],
+  ];
+  for (const [scale, suffix] of units) {
+    if (abs >= scale) return `${sign}$${(abs / scale).toFixed(2)}${suffix}`;
+  }
+  return `${sign}$${Math.round(abs).toLocaleString("en-US")}`;
+}
+
+/** Format a numeric metric to a fixed precision, or "—" when absent. */
+export function formatRatio(
+  value: number | null | undefined,
+  digits = 2,
+): string {
+  if (value == null || Number.isNaN(value)) return "—";
+  return value.toFixed(digits);
+}
+
+/** Format a fraction (0.18) as a signed percentage ("+18.0%"). The backend
+ *  stores revenue_growth / profit_margin as fractions; signed so a contraction
+ *  reads as negative at a glance (Von Restorff via the leading +/−). */
+export function formatPercent(
+  value: number | null | undefined,
+  { signed = false, digits = 1 }: { signed?: boolean; digits?: number } = {},
+): string {
+  if (value == null || Number.isNaN(value)) return "—";
+  const pct = value * 100;
+  const sign = signed && pct > 0 ? "+" : "";
+  return `${sign}${pct.toFixed(digits)}%`;
+}
+
 /** Relative time like "2m ago" / "3h ago"; falls back to a date for old runs. */
 export function formatRelativeTime(iso: string | null | undefined): string {
   if (!iso) return "—";

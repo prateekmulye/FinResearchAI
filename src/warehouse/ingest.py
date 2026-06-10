@@ -25,6 +25,7 @@ from typing import Any
 from sqlalchemy import select
 
 from src.warehouse.db import session_scope, warehouse_enabled
+from src.warehouse.embeddings import embed_or_none
 from src.warehouse.models import FundamentalsSnapshot, Instrument, PriceBar
 from src.warehouse.repos import (
     bulk_append_run_events,
@@ -154,6 +155,11 @@ async def record_news(
     ``ts`` is the item's ``published`` datetime when present AND tz-aware;
     otherwise now-UTC (naive published values are untrusted and ignored).
     Items without a url are skipped (url is the dedupe identity).
+
+    WP-9: when the warehouse embedder is available, each item's title (+ snippet
+    when present, newline-joined) is embedded into ``news_items.embedding`` for
+    /api/search. Embedding degrades independently — no embedder or an embed
+    failure stores the rows with NULL embeddings (never-raise contract intact).
     """
     if not warehouse_enabled():
         return 0
@@ -180,6 +186,20 @@ async def record_news(
             )
         if not rows:
             return 0
+        # Embed OUTSIDE the DB session (model inference is slow — same rule as
+        # refresh_prices' fetch-outside-session) and off the event loop
+        # (fastembed is sync CPU work). None -> rows land without embeddings.
+        # NOTE: already-deduped URLs still get embedded here (wasted inference)
+        # — negligible at ≤8 items/run; a url_hash pre-check is the optimization
+        # if item counts ever grow.
+        texts = [
+            f"{row['title']}\n{row['snippet']}" if row["snippet"] else row["title"]
+            for row in rows
+        ]
+        vectors = await asyncio.to_thread(embed_or_none, texts)
+        if vectors is not None:
+            for row, vector in zip(rows, vectors):
+                row["embedding"] = vector
         async with session_scope() as session:
             inst = await upsert_instrument(
                 session, ticker=ticker, exchange=exchange, screener=screener
@@ -345,6 +365,23 @@ async def record_run_events(run_id: str, events: list[dict[str, Any]]) -> int:
         return 0
 
 
+# Cap on report characters folded into the run's embedded summary text (WP-9).
+_RUN_SUMMARY_REPORT_CHARS = 1000
+
+
+def _run_summary_text(report: str, final_decision: dict[str, Any] | None) -> str:
+    """Text embedded into ``runs.embedding``: leading report chars + decision."""
+    parts = [report[:_RUN_SUMMARY_REPORT_CHARS]]
+    if final_decision:
+        action = final_decision.get("action")
+        rationale = final_decision.get("rationale")
+        if action:
+            parts.append(f"Decision: {action}")
+        if rationale:
+            parts.append(str(rationale))
+    return "\n".join(parts)
+
+
 async def record_run_finish(
     run_id: str,
     *,
@@ -359,10 +396,22 @@ async def record_run_finish(
     no payload), "aborted" (client disconnected before done/error). Only
     "finished" runs are honored by ``repos.latest_finished_run`` — verdict-cache
     semantics are preserved.
+
+    WP-9: "finished" runs WITH a report also get a summary embedding (leading
+    report chars + decision action/rationale) into ``runs.embedding`` for
+    /api/search — computed OUTSIDE the DB session, degrading to NULL when the
+    embedder is unavailable or fails (the run row is finalized regardless).
     """
     if not warehouse_enabled():
         return False
     try:
+        embedding: list[float] | None = None
+        if status == "finished" and report:
+            vectors = await asyncio.to_thread(
+                embed_or_none, [_run_summary_text(report, final_decision)]
+            )
+            if vectors:
+                embedding = vectors[0]
         async with session_scope() as session:
             run = await finish_run(
                 session,
@@ -371,6 +420,7 @@ async def record_run_finish(
                 final_decision=final_decision,
                 report=report,
                 metrics=metrics,
+                embedding=embedding,
             )
         if run is None:
             _LOG.warning(

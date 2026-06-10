@@ -5,6 +5,7 @@ Endpoints:
   GET  /api/library              -> finished/running runs, newest first (Research Library).
   GET  /api/runs/{run_id}        -> full run detail + replay events (warehouse, JSONL fallback).
   GET  /api/market/...           -> instruments / prices / fundamentals / news reads.
+  GET  /api/search               -> semantic (pgvector) / keyword search over news + runs.
   GET  /api/eval/results         -> persisted debate A/B eval results.
   GET  /healthz                  -> liveness probe (stays at root).
 
@@ -32,6 +33,7 @@ from src.api.routes import eval_results as eval_results_routes
 from src.api.routes import library as library_routes
 from src.api.routes import market as market_routes
 from src.api.routes import quota as quota_routes
+from src.api.routes import search as search_routes
 
 
 def create_app(
@@ -68,6 +70,7 @@ def create_app(
     app.include_router(market_routes.router, prefix="/api/market")
     app.include_router(eval_results_routes.router, prefix="/api/eval")
     app.include_router(quota_routes.router, prefix="/api")
+    app.include_router(search_routes.router, prefix="/api")
 
     # Daily demo caps render as a structured 429 the UI can act on.
     app.add_exception_handler(DailyQuotaExceeded, daily_quota_handler)
