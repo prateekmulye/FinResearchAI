@@ -147,6 +147,34 @@ class NewsResponse(BaseModel):
     items: list[NewsItemOut]
 
 
+# ---------------------------------------------------------------------- search
+
+
+class SearchHitOut(BaseModel):
+    """One /api/search hit (validates straight from ``repos.SearchHit``).
+
+    ``ref`` is the news url or the run_id depending on ``kind``. ``score`` is
+    the cosine distance (lower = closer) in semantic mode, null in keyword mode.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    kind: Literal["news", "run"]
+    ref: str
+    ticker: str
+    title: str
+    snippet: str | None = None
+    score: float | None = None
+    ts: datetime
+
+
+class SearchResponse(BaseModel):
+    """``mode`` reports which path actually answered (honest fallback)."""
+
+    mode: Literal["semantic", "keyword"]
+    hits: list[SearchHitOut]
+
+
 # ------------------------------------------------------------------------ eval
 
 
