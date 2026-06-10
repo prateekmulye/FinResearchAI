@@ -442,6 +442,62 @@ def api_sqlite_warehouse(monkeypatch, tmp_path):
     settings_mod.get_settings.cache_clear()
 
 
+# ---------------------------------------------------------------------------
+# WP-9 shared fixtures — added ADDITIVELY (existing fixtures above untouched).
+#
+# - no_real_embedder (autouse): pins the warehouse embedding seam to None for
+#   EVERY test so the offline suite can never lazily construct a real fastembed
+#   model (which downloads an ONNX model on first use). Tests that need
+#   embeddings inject a deterministic fake via ``warehouse_fake_embedder``.
+# ---------------------------------------------------------------------------
+
+
+class DeterministicEmbedder:
+    """Offline stand-in for the fastembed Embedder: sha256(text) -> 384 floats.
+
+    Deterministic per text, distinct across texts, plain python floats — enough
+    to assert JSON-text roundtrips and exercise the WP-9 write/search paths.
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[list[str]] = []
+
+    @staticmethod
+    def vector(text: str) -> list[float]:
+        import hashlib
+
+        digest = hashlib.sha256(text.encode("utf-8")).digest()
+        return [digest[i % len(digest)] / 255.0 for i in range(384)]
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        self.calls.append(list(texts))
+        return [self.vector(t) for t in texts]
+
+    def embed_one(self, text: str) -> list[float]:
+        return self.vector(text)
+
+
+@pytest.fixture(autouse=True)
+def no_real_embedder():
+    """Pin the warehouse embedding seam to None (no fastembed model, ever)."""
+    from src.warehouse import embeddings as warehouse_embeddings
+
+    warehouse_embeddings.set_embedder_for_testing(None)
+    yield
+    warehouse_embeddings.reset_embedder()
+
+
+@pytest.fixture
+def warehouse_fake_embedder():
+    """Inject a DeterministicEmbedder into the warehouse seam; returns the fake."""
+    from src.warehouse import embeddings as warehouse_embeddings
+
+    fake = DeterministicEmbedder()
+    warehouse_embeddings.set_embedder_for_testing(fake)
+    yield fake
+    warehouse_embeddings.reset_embedder()
+
+
 class _WPIFakeStructured:
     """Stand-in for llm.with_structured_output(Schema): its ainvoke returns a fixed instance."""
 
