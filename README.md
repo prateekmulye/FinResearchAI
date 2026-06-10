@@ -1,15 +1,3 @@
----
-title: FinResearchAI
-emoji: 📈
-colorFrom: blue
-colorTo: indigo
-sdk: docker
-app_port: 7860
-pinned: false
-license: osl-3.0
-short_description: Multi-agent equity research with a bull/bear debate, streamed over SSE
----
-
 # FinResearchAI
 
 A multi-agent equity-research system built on **LangGraph**. A 12-node graph routes a
@@ -20,8 +8,7 @@ score) and per-node cost/latency/token metrics.
 
 The whole run **streams live over Server-Sent Events**: one event per node start/complete,
 token deltas as agents speak, terminating in a `done` event carrying the report,
-decision, and metrics. It ships as a **Docker** Hugging Face Space (`Dockerfile` →
-uvicorn on port 7860).
+decision, and metrics. It ships as a **docker-compose** stack (Caddy + FastAPI + Postgres).
 
 ## Architecture
 
@@ -75,5 +62,9 @@ The dependency-free client `web/index.html` renders the stream live.
 
 ## Deploy
 
-Ships as a Docker HF Space — see [`README-hfspace.md`](./README-hfspace.md) for the
-Space frontmatter and secret/config notes.
+Ships as a docker-compose stack (Caddy auto-HTTPS + app + Postgres/pgvector) on any
+VPS — deployment guide lands in `docs/deploy.md` as part of the v2 elevation.
+
+## License
+
+[MIT](./LICENSE)

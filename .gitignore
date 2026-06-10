@@ -135,3 +135,6 @@ src/__pycache__/state.cpython-313.pyc
 # RunRecorder trace output
 runs/
 .chroma/
+
+# Brainstorming companion sessions
+.superpowers/
