@@ -27,6 +27,7 @@ function state(overrides: Partial<AnalysisStreamState> = {}): AnalysisStreamStat
     nodes: {},
     done: null,
     error: null,
+    errorStatus: null,
     ...overrides,
   };
 }
@@ -58,6 +59,24 @@ describe("resolveTopology", () => {
   it("stays on-topology when bull/bear are present", () => {
     const s = withNodes({ bull: node("bull"), bear: node("bear") });
     expect(resolveTopology(s).mode).toBe("on");
+  });
+
+  it("prefers an explicit off-hint from t=0 (no mid-run 12 -> 10 re-layout)", () => {
+    const { topology, mode } = resolveTopology(state(), "off");
+    expect(mode).toBe("off");
+    expect(topology.nodes).toHaveLength(10);
+  });
+
+  it("prefers an explicit on-hint", () => {
+    const { topology, mode } = resolveTopology(state(), "on");
+    expect(mode).toBe("on");
+    expect(topology.nodes).toHaveLength(12);
+  });
+
+  it("falls back to wire inference when no hint is given (replay case)", () => {
+    const s = withNodes({ research_synthesis: node("research_synthesis") });
+    expect(resolveTopology(s, null).mode).toBe("off");
+    expect(resolveTopology(s).mode).toBe("off");
   });
 });
 

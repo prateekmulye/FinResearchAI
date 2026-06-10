@@ -53,20 +53,21 @@ export function CostTicker({ state }: { state: AnalysisStreamState }) {
     return () => clearInterval(id);
   }, [active]);
 
-  // Wall-clock elapsed while live; at done, prefer the summed node latency
-  // (the honest agent compute time) when the wall clock was trivially short
-  // (e.g. a near-instant cached/fake run).
+  // Wall-clock elapsed while live and at done. Only a trivially short wall
+  // clock (< 2s — a near-instant cached/fake run) is substituted with the
+  // summed per-node latency: on a real run parallel nodes routinely make that
+  // sum EXCEED the wall time, so it must never replace it.
   const wall = elapsedSeconds(state, now);
   const elapsed =
-    state.phase === "done" && wall < totals.latencyS ? totals.latencyS : wall;
+    state.phase === "done" && wall < 2 && totals.latencyS > wall
+      ? totals.latencyS
+      : wall;
 
   // Flash the token/cost stats whenever a new node reports (collision-driven).
+  // role="group", NOT a live region: the 1Hz clock would announce every second.
+  // The terminal cost summary is announced once by the StatusAnnouncer.
   return (
-    <div
-      className="flex items-center gap-5"
-      role="status"
-      aria-label="Live run cost"
-    >
+    <div className="flex items-center gap-5" role="group" aria-label="Run cost">
       <Stat
         icon={Hash}
         label="tokens"

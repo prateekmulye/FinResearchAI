@@ -56,6 +56,8 @@ export interface AnalysisStreamState {
   nodes: Record<string, NodeRun>;
   done: AnalysisDone | null;
   error: string | null;
+  /** HTTP status behind the error, when one exists (429 drives quota UX). */
+  errorStatus: number | null;
 }
 
 const initialState: AnalysisStreamState = {
@@ -67,12 +69,13 @@ const initialState: AnalysisStreamState = {
   nodes: {},
   done: null,
   error: null,
+  errorStatus: null,
 };
 
 type Action =
   | { kind: "connect" }
   | { kind: "event"; event: AnalysisEvent }
-  | { kind: "error"; message: string }
+  | { kind: "error"; message: string; status?: number | null }
   | { kind: "abort" }
   | { kind: "reset" };
 
@@ -95,7 +98,12 @@ function reducer(state: AnalysisStreamState, action: Action): AnalysisStreamStat
     case "connect":
       return { ...initialState, phase: "connecting" };
     case "error":
-      return { ...state, phase: "error", error: action.message };
+      return {
+        ...state,
+        phase: "error",
+        error: action.message,
+        errorStatus: action.status ?? null,
+      };
     case "abort":
       // A user-stopped run lands back at rest (the form recovers its Run
       // affordance); a terminal done/error phase is never clobbered.
@@ -157,7 +165,8 @@ function reducer(state: AnalysisStreamState, action: Action): AnalysisStreamStat
             },
           };
         case "error":
-          return { ...state, phase: "error", error: e.message };
+          // In-stream failure — there is no HTTP status behind it.
+          return { ...state, phase: "error", error: e.message, errorStatus: null };
         default:
           return state;
       }
@@ -239,6 +248,7 @@ export function useAnalysisStream(): UseAnalysisStream {
         dispatch({
           kind: "error",
           message: "Rate limited — daily live-run quota reached. Try a replay.",
+          status: 429,
         });
         return;
       }
@@ -246,6 +256,7 @@ export function useAnalysisStream(): UseAnalysisStream {
         dispatch({
           kind: "error",
           message: new ApiError(`analyze -> ${res.status}`, res.status).message,
+          status: res.status,
         });
         return;
       }

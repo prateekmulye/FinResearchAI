@@ -23,6 +23,12 @@ function AnalystCard({ panel, title }: { panel: AnalystPanel; title: string }) {
             <ConfidenceChip value={panel.confidence} />
           </div>
         </div>
+      ) : panel.status === "complete" ? (
+        // Completed without a structured report — the node degraded. Amber is
+        // the DESIGN token for warn/degraded; never show a check + "analyzing…".
+        <p className="font-mono text-xs text-[var(--color-hold)]">
+          no report — degraded
+        </p>
       ) : panel.status === "pending" ? (
         <p className="font-mono text-xs text-[var(--color-fg-subtle)]">
           awaiting router…

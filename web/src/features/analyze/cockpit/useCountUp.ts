@@ -14,11 +14,15 @@ import { useReducedMotion } from "@/hooks/useReducedMotion";
 
 const EASE_OUT = (t: number) => 1 - Math.pow(1 - t, 3); // cubic-bezier(.16,1,.3,1)-ish
 
+// Module-scope so the default keeps a stable identity: an inline default would
+// be a fresh function every render and re-fire the effect (it deps on format).
+const defaultFormat = (n: number) => String(Math.round(n));
+
 export function useCountUp(
   target: number,
   options: { duration?: number; active?: boolean; format?: (n: number) => string } = {},
 ) {
-  const { duration = 300, active = true, format = (n) => String(Math.round(n)) } = options;
+  const { duration = 300, active = true, format = defaultFormat } = options;
   const ref = useRef<HTMLSpanElement | null>(null);
   const reduced = useReducedMotion();
 

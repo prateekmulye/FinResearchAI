@@ -9,6 +9,8 @@
  * xyflow + the markdown renderer (marked/dompurify) only load with this module,
  * which is itself reachable only from the lazy Analyze route chunk.
  */
+import { useMemo } from "react";
+
 import { LiveFeed } from "@/features/analyze/LiveFeed";
 import type { AnalysisStreamState } from "@/hooks/useAnalysisStream";
 
@@ -17,8 +19,10 @@ import { CostTicker } from "./CostTicker";
 import { DebateTheater } from "./DebateTheater";
 import { DecisionReveal } from "./DecisionReveal";
 import { PipelineCanvas } from "./PipelineCanvas";
+import { StatusAnnouncer } from "./StatusAnnouncer";
 import { TradeRisk } from "./TradeRisk";
 import {
+  type DebateTopology,
   analystPanel,
   debatePanel,
   nodeStatuses,
@@ -27,9 +31,25 @@ import {
   tradePanel,
 } from "./pipeline";
 
-export function Cockpit({ state }: { state: AnalysisStreamState }) {
-  const { topology, mode } = resolveTopology(state);
-  const statuses = nodeStatuses(state, topology);
+export function Cockpit({
+  state,
+  modeHint = null,
+}: {
+  state: AnalysisStreamState;
+  /**
+   * The debate mode the user explicitly requested (AnalyzeForm). Lets the
+   * canvas render the right topology from t=0; absent (replay), the topology
+   * is inferred from the wire. See resolveTopology.
+   */
+  modeHint?: DebateTopology | null;
+}) {
+  const { topology, mode } = useMemo(
+    () => resolveTopology(state, modeHint),
+    [state, modeHint],
+  );
+  // Memoized so PipelineCanvas (React.memo) skips re-rendering — and its
+  // internal node/edge useMemos hold — whenever neither input changed.
+  const statuses = useMemo(() => nodeStatuses(state, topology), [state, topology]);
 
   const news = analystPanel(state, statuses, "news_analyst");
   const fundamentals = analystPanel(state, statuses, "fundamentals_analyst");
@@ -61,10 +81,15 @@ export function Cockpit({ state }: { state: AnalysisStreamState }) {
 
         <PipelineCanvas topology={topology} statuses={statuses} />
 
+        {/* The ONE polite live region. It must stay a direct child of the
+            section — inside the collapsed <details> below it would be removed
+            from the a11y tree and every announcement muted. */}
+        <StatusAnnouncer state={state} />
+
         {/* The aria-hidden canvas is shadowed by this semantic status spine:
-            the polite role="status" announcer always lives here; the per-node
-            list is a textual transcript, collapsed so it complements (not
-            competes with) the canvas. Tab order: Input -> Transcript -> Result. */}
+            the per-node list is a textual transcript, collapsed so it
+            complements (not competes with) the canvas. Tab order:
+            Input -> Transcript -> Result. */}
         {state.order.length > 0 && (
           <details className="group rounded-xl border border-[var(--color-line)] bg-[var(--color-surface-1)]/40">
             <summary className="flex cursor-pointer select-none items-center gap-2 px-3.5 py-2.5 font-mono text-2xs uppercase tracking-[0.16em] text-[var(--color-fg-subtle)] marker:content-none">
@@ -76,8 +101,6 @@ export function Cockpit({ state }: { state: AnalysisStreamState }) {
             </div>
           </details>
         )}
-        {/* Keep the announcer mounted even before the transcript exists. */}
-        {state.order.length === 0 && <LiveFeed state={state} />}
       </section>
 
       {/* Intelligence panels — pure functions of the same state. */}

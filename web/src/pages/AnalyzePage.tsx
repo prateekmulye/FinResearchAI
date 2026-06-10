@@ -1,4 +1,5 @@
 import { AlertTriangle, Sparkles } from "lucide-react";
+import { useState } from "react";
 
 import { GlassCard } from "@/components/ui/glass-card";
 import { PageHeader } from "@/components/ui/page-header";
@@ -7,6 +8,7 @@ import { Cockpit } from "@/features/analyze/cockpit/Cockpit";
 import { QuotaBlocked } from "@/features/analyze/cockpit/QuotaBlocked";
 import { isQuotaError } from "@/features/analyze/cockpit/quota";
 import { useAnalysisStream } from "@/hooks/useAnalysisStream";
+import type { DebateMode } from "@/lib/api";
 
 /**
  * AnalyzePage — the live cockpit (WP-7). The command bar kicks off a run; the
@@ -16,8 +18,12 @@ import { useAnalysisStream } from "@/hooks/useAnalysisStream";
  */
 export function AnalyzePage() {
   const { state, isActive, start, stop } = useAnalysisStream();
+  // The debate mode the user explicitly requested for the CURRENT run — lets
+  // the cockpit lay out the right topology from t=0 (null = server default).
+  const [modeHint, setModeHint] = useState<DebateMode | null>(null);
 
-  const quotaBlocked = state.phase === "error" && isQuotaError(state.error);
+  const quotaBlocked =
+    state.phase === "error" && isQuotaError(state.error, state.errorStatus);
   const hardError = state.phase === "error" && !quotaBlocked;
   const hasRun = state.order.length > 0 || state.phase !== "idle";
 
@@ -36,13 +42,14 @@ export function AnalyzePage() {
 
       <GlassCard>
         <AnalyzeForm
-          onSubmit={(v) =>
-            start({
+          onSubmit={(v) => {
+            setModeHint(v.debateMode ?? null);
+            void start({
               ticker: v.ticker,
               investorMode: v.investorMode,
               ...(v.debateMode ? { debateMode: v.debateMode } : {}),
-            })
-          }
+            });
+          }}
           onStop={stop}
           isActive={isActive}
           disabled={state.phase === "connecting"}
@@ -79,7 +86,7 @@ export function AnalyzePage() {
 
       {/* The cockpit. Renders the moment a run begins; persists after done. */}
       {hasRun && !quotaBlocked ? (
-        <Cockpit state={state} />
+        <Cockpit state={state} modeHint={modeHint} />
       ) : (
         state.phase === "idle" &&
         !quotaBlocked && (

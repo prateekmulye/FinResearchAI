@@ -14,10 +14,14 @@ import { marked } from "marked";
 
 marked.setOptions({ gfm: true, breaks: false });
 
-// Harden any anchors DOMPurify keeps: external links get noopener/noreferrer.
+// Harden the anchors DOMPurify keeps: only ABSOLUTE http(s) links (the truly
+// external ones) get target=_blank + noopener/noreferrer. Relative and
+// fragment links stay in-tab — new-tabbing a same-app link breaks navigation.
 if (typeof window !== "undefined") {
   DOMPurify.addHook("afterSanitizeAttributes", (node) => {
-    if (node.tagName === "A" && node.getAttribute("href")) {
+    if (node.tagName !== "A") return;
+    const href = node.getAttribute("href") ?? "";
+    if (/^https?:\/\//i.test(href)) {
       node.setAttribute("target", "_blank");
       node.setAttribute("rel", "noopener noreferrer");
     }

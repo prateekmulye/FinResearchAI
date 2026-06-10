@@ -14,10 +14,7 @@
  *      structured payloads (analyst reports, theses, trade proposal, stances,
  *      verdicts) the intelligence panels render.
  */
-import type {
-  AnalysisStreamState,
-  AnalysisDone,
-} from "@/hooks/useAnalysisStream";
+import type { AnalysisStreamState } from "@/hooks/useAnalysisStream";
 import type { Action } from "@/lib/api";
 
 /* ----------------------------------------------------------- topology types */
@@ -122,16 +119,29 @@ const TOPOLOGY_OFF: Topology = {
 };
 
 /**
- * Pick the topology to render. We never see `debate_mode` on the wire, so we
- * INFER it from the nodes the stream has actually produced: the presence of a
- * `research_synthesis` node (or absence of bull/bear) means the off-topology.
- * Until research nodes appear we default to the on-topology (the common case
- * and the larger graph, so the canvas can't grow a column mid-run).
+ * Pick the topology to render.
+ *
+ * When the caller knows the requested debate mode (the Analyze form passes it
+ * as `modeHint`), that wins — an explicit debate-off run renders the synthesis
+ * topology from t=0 instead of re-laying-out 12 -> 10 nodes mid-run when
+ * `research_synthesis` first appears.
+ *
+ * Without a hint (the replay case, or a server-default run), we never see
+ * `debate_mode` on the wire, so we INFER it from the nodes the stream has
+ * actually produced: a `research_synthesis` node means the off-topology. Until
+ * research nodes appear we default to the on-topology (the common case and the
+ * larger graph, so the canvas can't grow a column mid-run).
  */
-export function resolveTopology(state: AnalysisStreamState): {
+export function resolveTopology(
+  state: AnalysisStreamState,
+  modeHint?: DebateTopology | null,
+): {
   topology: Topology;
   mode: DebateTopology;
 } {
+  if (modeHint === "off") return { topology: TOPOLOGY_OFF, mode: "off" };
+  if (modeHint === "on") return { topology: TOPOLOGY_ON, mode: "on" };
+
   const seen = state.nodes;
   if (seen["research_synthesis"]) return { topology: TOPOLOGY_OFF, mode: "off" };
   if (seen["bull"] || seen["bear"] || seen["facilitator"]) {
@@ -435,11 +445,4 @@ export function elapsedSeconds(state: AnalysisStreamState, now: number): number 
     return Math.max(0, (last - first) / 1000);
   }
   return Math.max(0, (now - first) / 1000);
-}
-
-/* ------------------------------------------------------------ done helpers */
-
-/** True once a terminal verdict is available to reveal. */
-export function hasVerdict(done: AnalysisDone | null): boolean {
-  return !!done?.finalDecision;
 }

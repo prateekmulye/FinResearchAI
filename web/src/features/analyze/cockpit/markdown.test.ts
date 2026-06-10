@@ -52,3 +52,19 @@ describe("sanitizeMarkdown — injection defense", () => {
     expect(sanitizeMarkdown(undefined)).toBe("");
   });
 });
+
+describe("sanitizeMarkdown — link target hardening", () => {
+  it("opens absolute http(s) links in a new tab with noopener", () => {
+    const html = sanitizeMarkdown("[src](https://example.com/report)");
+    expect(html).toContain('target="_blank"');
+    expect(html).toContain('rel="noopener noreferrer"');
+  });
+
+  it("leaves relative and fragment links alone (no target=_blank)", () => {
+    const relative = sanitizeMarkdown("[docs](/library)");
+    expect(relative).not.toContain('target="_blank"');
+
+    const fragment = sanitizeMarkdown("[top](#summary)");
+    expect(fragment).not.toContain('target="_blank"');
+  });
+});

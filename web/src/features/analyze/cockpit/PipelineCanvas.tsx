@@ -25,7 +25,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/base.css";
 import { Check, X } from "lucide-react";
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 
 import { nodeLabel, nodePhase } from "@/features/analyze/nodeLabels";
 import { cn } from "@/lib/utils";
@@ -192,7 +192,10 @@ const edgeTypes = { fin: FinEdge };
 
 /* ------------------------------------------------------------- the canvas */
 
-export function PipelineCanvas({
+// React.memo + the Cockpit-side useMemo on `statuses` means the canvas (and
+// its node/edge useMemos) only re-renders when the topology or a node status
+// actually changed — not on every parent render.
+export const PipelineCanvas = memo(function PipelineCanvas({
   topology,
   statuses,
 }: {
@@ -257,4 +260,4 @@ export function PipelineCanvas({
       />
     </div>
   );
-}
+});

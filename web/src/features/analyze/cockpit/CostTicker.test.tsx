@@ -1,5 +1,7 @@
 /**
  * CostTicker renders cumulative tokens + cost + elapsed from stream state.
+ * It must NOT be a live region (its 1Hz clock would announce every second);
+ * the terminal summary is announced once by the StatusAnnouncer instead.
  */
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
@@ -22,6 +24,7 @@ function state(over: Partial<AnalysisStreamState> = {}): AnalysisStreamState {
     nodes: {},
     done: null,
     error: null,
+    errorStatus: null,
     ...over,
   };
 }
@@ -48,8 +51,46 @@ describe("CostTicker", () => {
     expect(screen.getByText("$0.0040")).toBeInTheDocument(); // 0.001 + 0.003
   });
 
-  it("exposes a labelled live status region", () => {
+  it("is a labelled group, NOT a live region (no per-second announcements)", () => {
     render(<CostTicker state={state()} />);
-    expect(screen.getByRole("status", { name: /live run cost/i })).toBeInTheDocument();
+    const group = screen.getByRole("group", { name: /run cost/i });
+    expect(group).toBeInTheDocument();
+    expect(group).not.toHaveAttribute("aria-live");
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("shows wall time at done — parallel nodes make summed latency exceed it", () => {
+    // Wall clock: 30s (1000 -> 31000). Summed per-node latency: 50s.
+    const s = state({
+      phase: "done",
+      order: ["router"],
+      nodes: { router: node("router", { startedAt: 1000, completedAt: 31000 }) },
+      done: {
+        finalReport: "# r",
+        finalDecision: null,
+        runMetrics: [
+          { node: "router", latency_s: 20 },
+          { node: "news_analyst", latency_s: 30 },
+        ],
+      },
+    });
+    render(<CostTicker state={s} />);
+    expect(screen.getByText("30s")).toBeInTheDocument();
+  });
+
+  it("substitutes summed node latency only for a trivially short wall clock (cached run)", () => {
+    // Wall clock: 0.5s (a near-instant cached/fake run). Summed latency: 3.2s.
+    const s = state({
+      phase: "done",
+      order: ["router"],
+      nodes: { router: node("router", { startedAt: 1000, completedAt: 1500 }) },
+      done: {
+        finalReport: "# r",
+        finalDecision: null,
+        runMetrics: [{ node: "router", latency_s: 3.2 }],
+      },
+    });
+    render(<CostTicker state={s} />);
+    expect(screen.getByText("3.2s")).toBeInTheDocument();
   });
 });
