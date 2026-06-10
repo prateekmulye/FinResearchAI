@@ -48,8 +48,25 @@ def test_analyze_streams_events_ending_in_done(offline_graph):
 
 def test_analyze_rejects_bad_ticker_with_422():
     with TestClient(create_app()) as client:
-        resp = client.post("/api/analyze", json={"ticker": "; DROP TABLE--"})
-        assert resp.status_code == 422
+        for junk in ("; DROP TABLE--", "../etc", "\U0001f680", "A" * 30):
+            resp = client.post("/api/analyze", json={"ticker": junk})
+            assert resp.status_code == 422, junk
+
+
+def test_analyze_rejects_bad_enum_fields_with_422():
+    with TestClient(create_app()) as client:
+        assert (
+            client.post(
+                "/api/analyze", json={"ticker": "AAPL", "debate_mode": "maybe"}
+            ).status_code
+            == 422
+        )
+        assert (
+            client.post(
+                "/api/analyze", json={"ticker": "AAPL", "investor_mode": "YOLO"}
+            ).status_code
+            == 422
+        )
 
 
 def test_rate_limit_returns_429_after_cap(offline_graph):

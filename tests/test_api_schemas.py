@@ -51,6 +51,43 @@ def test_ticker_regex_anchored():
     assert not TICKER_RE.fullmatch("AAPL AAPL")
 
 
+# WP-5 hardening: strict allowlist ^[A-Z0-9][A-Z0-9.\-]{0,14}$ after strip/upper.
+
+
+@pytest.mark.parametrize(
+    "junk",
+    [
+        "../etc",            # traversal
+        "AAPL; DROP",        # injection-ish
+        "\U0001f680",        # emoji
+        "A" * 30,            # over-long
+        "A" * 16,            # one past the 15-char cap
+        "-AAPL",             # must start alphanumeric
+        ".NS",               # ditto
+        "AAPL\n",            # control chars survive strip? (\n is stripped -> ok)
+    ],
+)
+def test_analyze_request_rejects_junk_tickers(junk):
+    if junk == "AAPL\n":  # strip() normalizes trailing whitespace -> valid
+        assert AnalyzeRequest(ticker=junk).ticker == "AAPL"
+        return
+    with pytest.raises(ValidationError):
+        AnalyzeRequest(ticker=junk)
+
+
+@pytest.mark.parametrize("ok", ["aapl", "BRK.B", "BRK-B", "0700.HK", "A", "A" * 15])
+def test_analyze_request_accepts_allowlisted_tickers(ok):
+    assert AnalyzeRequest(ticker=ok).ticker == ok.upper()
+
+
+def test_analyze_request_rejects_bad_debate_mode():
+    with pytest.raises(ValidationError):
+        AnalyzeRequest(ticker="AAPL", debate_mode="maybe")
+    assert AnalyzeRequest(ticker="AAPL", debate_mode="on").debate_mode == "on"
+    assert AnalyzeRequest(ticker="AAPL", debate_mode="off").debate_mode == "off"
+    assert AnalyzeRequest(ticker="AAPL", debate_mode=None).debate_mode is None
+
+
 def test_sse_event_shape():
     ev = sse_event("node_complete", {"type": "node_complete", "run_id": "r1", "node": "router"})
     assert ev["event"] == "node_complete"
