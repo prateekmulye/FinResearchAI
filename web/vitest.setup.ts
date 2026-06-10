@@ -17,6 +17,21 @@ if (!window.matchMedia) {
   }));
 }
 
+// jsdom doesn't implement ResizeObserver; the WP-9 candlestick chart observes
+// its container for responsive resizing. A no-op stub keeps any real chart-
+// adjacent component from throwing on construction. (The chart module itself is
+// mocked in the dossier test; this is belt-and-braces for components that build
+// an observer directly.)
+if (!("ResizeObserver" in globalThis)) {
+  class ResizeObserverStub {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+  globalThis.ResizeObserver =
+    ResizeObserverStub as unknown as typeof ResizeObserver;
+}
+
 afterEach(() => {
   cleanup();
 });

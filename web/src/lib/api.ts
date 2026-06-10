@@ -146,6 +146,29 @@ export interface NewsResponse {
   items: NewsItem[];
 }
 
+/** One /api/search hit. Mirrors dto.py::SearchHitOut.
+ *
+ * `kind` decides what `ref` means: a news url ("news") or a run_id ("run").
+ * `score` is the cosine distance (lower = closer) in semantic mode and null in
+ * keyword mode — never surface it as a "relevance %", it's a distance.
+ */
+export interface SearchHit {
+  kind: "news" | "run";
+  ref: string;
+  ticker: string;
+  title: string;
+  snippet: string | null;
+  score: number | null;
+  ts: string;
+}
+
+/** Mirrors dto.py::SearchResponse. `mode` is the honesty cue: "keyword" means
+ * the semantic path was unavailable and we fell back to index matching. */
+export interface SearchResponse {
+  mode: "semantic" | "keyword";
+  hits: SearchHit[];
+}
+
 /* -------------------------------------------------------------------- eval */
 
 export interface EvalResult {
@@ -285,6 +308,9 @@ export const api = {
       params,
       signal,
     ),
+
+  searchResearch: (params: { q: string; limit?: number }, signal?: AbortSignal) =>
+    getJson<SearchResponse>("/api/search", params, signal),
 
   evalResults: (params?: { limit?: number }, signal?: AbortSignal) =>
     getJson<EvalResultsResponse>("/api/eval/results", params, signal),

@@ -70,6 +70,32 @@ describe("api client — request shaping", () => {
     expect(fetchMock.mock.calls[0]![0]).toBe("/api/market/instruments?q=apple");
   });
 
+  it("prices() threads exchange + days, encoding the ticker", async () => {
+    await api.prices("RELIANCE.NS", { exchange: "NSE", days: 180 });
+    expect(fetchMock.mock.calls[0]![0]).toBe(
+      "/api/market/RELIANCE.NS/prices?exchange=NSE&days=180",
+    );
+  });
+
+  it("fundamentals() builds the per-ticker fundamentals path", async () => {
+    await api.fundamentals("0700.HK", { exchange: "HKEX" });
+    expect(fetchMock.mock.calls[0]![0]).toBe(
+      "/api/market/0700.HK/fundamentals?exchange=HKEX",
+    );
+  });
+
+  it("news() threads exchange + limit", async () => {
+    await api.news("NVDA", { limit: 8 });
+    expect(fetchMock.mock.calls[0]![0]).toBe("/api/market/NVDA/news?limit=8");
+  });
+
+  it("searchResearch() hits /api/search with the query", async () => {
+    await api.searchResearch({ q: "tariff risk", limit: 12 });
+    expect(fetchMock.mock.calls[0]![0]).toBe(
+      "/api/search?q=tariff+risk&limit=12",
+    );
+  });
+
   it("quota() and health() hit fixed paths", async () => {
     await api.quota();
     await api.health();
