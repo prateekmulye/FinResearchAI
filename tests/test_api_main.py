@@ -114,3 +114,20 @@ def test_old_root_runs_route_removed(tmp_path):
     rec.flush()
     with TestClient(create_app(runs_dir=str(tmp_path))) as client:
         assert client.get(f"/runs/{rec.run_id}").status_code == 404
+
+
+def test_create_app_configures_root_logging_for_containers():
+    # uvicorn only configures its own loggers; without a root handler the
+    # lifespan/collector INFO lines vanish from `docker logs` (WP-11). basicConfig
+    # must be applied by create_app — and stay a no-op when handlers exist.
+    import logging
+
+    root = logging.getLogger()
+    saved_handlers, saved_level = root.handlers[:], root.level
+    root.handlers = []
+    try:
+        create_app()
+        assert root.handlers, "create_app must install a root log handler"
+        assert root.level <= logging.INFO
+    finally:
+        root.handlers, root.level = saved_handlers, saved_level

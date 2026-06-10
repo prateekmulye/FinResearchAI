@@ -8,3 +8,13 @@ runs
 tests
 .env
 docs
+web/node_modules
+web/dist
+.mypy_cache
+.ruff_cache
+*.egg-info
+.github
+.claude
+.superpowers
+AAPL_report.*
+evals

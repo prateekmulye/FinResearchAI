@@ -1,0 +1,92 @@
+# WP-11 production stack: Caddy (auto-HTTPS edge) + app (FastAPI) + db (pgvector).
+#
+#   cp .env.example .env   # fill in keys, CADDY_DOMAIN, a strong POSTGRES_PASSWORD
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Only Caddy publishes host ports; app and db stay on the internal network.
+# Full runbook: docs/deploy.md. (docker-compose.yml remains the dev-only db.)
+services:
+  caddy:
+    build:
+      context: .
+      target: caddy
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      # Unset -> plain :80 (local stack testing, no TLS). The default must be
+      # applied HERE: compose would otherwise export CADDY_DOMAIN="" (set but
+      # empty), and Caddy's {$VAR:default} only falls back when the var is
+      # truly unset — an empty site address makes the first block parse as
+      # global options and Caddy crash-loops.
+      CADDY_DOMAIN: ${CADDY_DOMAIN:-:80}
+    volumes:
+      - caddy_data:/data      # ACME account + certs; MUST persist across deploys
+      - caddy_config:/config
+    depends_on:
+      app:
+        condition: service_healthy
+    restart: unless-stopped
+
+  app:
+    build:
+      context: .
+      target: runtime
+    # No host ports: Caddy is the only way in.
+    environment:
+      DATABASE_URL: postgresql+asyncpg://finresearch:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/finresearch
+      OLLAMA_API_KEY: ${OLLAMA_API_KEY:-}
+      FIRECRAWL_API_KEY: ${FIRECRAWL_API_KEY:-}
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-}
+      # Caddy appends the real client IP to X-Forwarded-For; the rate limiter
+      # and demo quotas key on it (src/api/client_ip.py).
+      TRUST_PROXY: "1"
+      COLLECTOR_ENABLED: "1"
+      # Same-origin in practice (Caddy serves SPA + API together); locked anyway.
+      ALLOWED_ORIGINS: https://${CADDY_DOMAIN:-localhost}
+      RUNS_DIR: /app/runs
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      # Deterministic offline demo mode — leave 0 in production.
+      APP_FAKE_LLM: ${APP_FAKE_LLM:-0}
+    volumes:
+      - app_runs:/app/runs
+    healthcheck:
+      # urllib instead of curl: nothing extra to install in the slim image.
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:7860/healthz', timeout=3).status == 200 else 1)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 45s # entrypoint may spend up to ~30s waiting on migrations
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: finresearch
+      # Required — no default in the prod file by design.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: finresearch
+    # No host ports: reachable only from the app container.
+    volumes:
+      - pgdata_prod:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U finresearch -d finresearch"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:
+  pgdata_prod:
+  app_runs:

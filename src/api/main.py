@@ -19,6 +19,7 @@ input validation via AnalyzeRequest. The limiter and runs dir are app-scoped on
 """
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 
@@ -43,6 +44,15 @@ def create_app(
     runs_dir: str | None = None,
     allowed_origins: list[str] | None = None,
 ) -> FastAPI:
+    # Container observability (WP-11): uvicorn configures only its own loggers,
+    # so without a root handler the app's INFO lines (watchlist seeding,
+    # "collector started") never reach `docker logs`. basicConfig is a no-op
+    # when a root handler already exists (pytest, dev reloaders, embedders).
+    logging.basicConfig(
+        level=os.getenv("LOG_LEVEL", "INFO").upper(),
+        format="%(levelname)s [%(name)s] %(message)s",
+    )
+
     # Lifespan (WP-3): watchlist seeding + the gated collector; degrades on any
     # failure so it can never affect startup — see src/api/lifespan.py.
     app = FastAPI(title="FinResearchAI API", version="0.2.0", lifespan=lifespan)
