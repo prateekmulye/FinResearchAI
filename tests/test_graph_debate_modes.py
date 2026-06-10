@@ -33,7 +33,10 @@ def _patch_analysts(monkeypatch):
             return _RouterStructured()
 
     monkeypatch.setattr(router_mod, "get_llm", lambda tier: _RouterLLM())
-    monkeypatch.setattr(router_mod, "_get_cached_verdict", lambda *a, **k: None)
+    async def _no_cached_verdict(*a, **k):
+        return None
+
+    monkeypatch.setattr(router_mod, "_get_cached_verdict", _no_cached_verdict)
 
     _analyst_report = AnalystReport(summary="stub report", key_points=[], confidence=0.5)
 

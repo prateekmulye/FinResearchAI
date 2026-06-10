@@ -210,8 +210,11 @@ def _install_offline_graph(monkeypatch) -> None:
 
     fake_llm = _SchemaAwareLLM()
 
+    async def _no_cached_verdict(*a, **k):
+        return None
+
     monkeypatch.setattr(router_mod, "get_llm", lambda tier: _RouterLLM())
-    monkeypatch.setattr(router_mod, "_get_cached_verdict", lambda *a, **k: None)
+    monkeypatch.setattr(router_mod, "_get_cached_verdict", _no_cached_verdict)
 
     for mod in (
         news_mod, fund_mod, tech_mod, bull_mod, bear_mod, fac_mod, syn_mod,
@@ -219,9 +222,13 @@ def _install_offline_graph(monkeypatch) -> None:
     ):
         if hasattr(mod, "get_llm"):
             monkeypatch.setattr(mod, "get_llm", lambda tier, _llm=fake_llm: _llm)
-    # arbiter may call memory.store_verdict (WP-C); neutralize it offline.
+    # arbiter awaits memory.store_verdict (WP-2: async, warehouse-backed);
+    # neutralize it offline with an async no-op.
+    async def _noop_store_verdict(*a, **k):
+        return None
+
     if hasattr(arb_mod, "store_verdict"):
-        monkeypatch.setattr(arb_mod, "store_verdict", lambda *a, **k: None)
+        monkeypatch.setattr(arb_mod, "store_verdict", _noop_store_verdict)
 
     monkeypatch.setattr(
         news_mod,

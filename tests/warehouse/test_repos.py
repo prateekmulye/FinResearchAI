@@ -24,7 +24,9 @@ from src.warehouse.repos import (
     get_run_events,
     increment_quota,
     insert_fundamentals,
+    insert_verdict,
     latest_finished_run,
+    latest_verdict,
     list_eval_results,
     list_runs,
     list_watched,
@@ -294,3 +296,43 @@ async def test_save_and_list_eval_results(session):
     assert results[0].pairs == [{"ticker": "MSFT"}]
 
     assert [r.label for r in await list_eval_results(session, limit=1)] == ["second"]
+
+
+# --------------------------------------------------------------------- verdicts
+
+
+async def test_insert_verdict_persists_row(session):
+    row = await insert_verdict(session, "AAPL", {"action": "BUY", "score": 70}, TS)
+    assert row.id is not None
+    assert row.ticker == "AAPL"
+    assert row.ts == TS
+    assert row.decision == {"action": "BUY", "score": 70}
+
+
+async def test_latest_verdict_newest_by_ts(session):
+    await insert_verdict(session, "AAPL", {"action": "SELL", "score": 10}, TS)
+    await insert_verdict(session, "AAPL", {"action": "BUY", "score": 90}, TS + timedelta(hours=1))
+
+    row = await latest_verdict(session, "AAPL")
+    assert row is not None
+    assert row.decision == {"action": "BUY", "score": 90}
+    assert row.ts == TS + timedelta(hours=1)
+
+
+async def test_latest_verdict_id_desc_tie_break_on_equal_ts(session):
+    first = await insert_verdict(session, "AAPL", {"v": 1}, TS)
+    second = await insert_verdict(session, "AAPL", {"v": 2}, TS)  # same ts, higher id
+
+    row = await latest_verdict(session, "AAPL")
+    assert row is not None
+    assert row.id == second.id and row.id != first.id
+    assert row.decision == {"v": 2}
+
+
+async def test_latest_verdict_is_per_ticker(session):
+    await insert_verdict(session, "AAPL", {"action": "BUY"}, TS + timedelta(hours=2))
+    await insert_verdict(session, "MSFT", {"action": "SELL"}, TS)
+
+    row = await latest_verdict(session, "MSFT")
+    assert row is not None and row.decision == {"action": "SELL"}
+    assert await latest_verdict(session, "ZZZZ") is None

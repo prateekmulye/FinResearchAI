@@ -45,15 +45,18 @@ def _model_plan() -> dict:
     return {"analysts": "quick", "debate": "deep", "verdict": "deep", "risk": "deep"}
 
 
-def _get_cached_verdict(ticker: str, max_age_min: int):
-    """Guarded import of the WP-C cache. Returns None if memory is not merged yet."""
+async def _get_cached_verdict(ticker: str, max_age_min: int):
+    """Guarded import of the verdict cache (WP-2: async, warehouse-backed).
+
+    Returns None if the memory module is absent or the lookup fails.
+    """
     try:
         from src.memory.cache import get_cached_verdict
     except ImportError:
-        # Expected when WP-C is not yet merged; stay silent.
+        # Expected when the memory module is not present; stay silent.
         return None
     try:
-        return get_cached_verdict(ticker, max_age_min)
+        return await get_cached_verdict(ticker, max_age_min)
     except Exception as exc:
         _LOG.warning("verdict cache lookup failed: %s", exc)
         return None
@@ -94,9 +97,9 @@ async def router(state: dict) -> dict:
         "run_metrics": per_node,
     }
 
-    # Optional cache short-circuit (WP-C). If a fresh verdict exists, attach it so
+    # Optional cache short-circuit. If a fresh verdict exists, attach it so
     # the graph (WP-D's conditional edge) can skip straight to the reporter.
-    cached = _get_cached_verdict(resolution.resolved_ticker, max_age_min=60)
+    cached = await _get_cached_verdict(resolution.resolved_ticker, max_age_min=60)
     if cached is not None:
         out["final_decision"] = cached.model_dump()
         out["model_plan"] = {**out["model_plan"], "cache_hit": True}

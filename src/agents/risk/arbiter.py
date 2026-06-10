@@ -1,7 +1,7 @@
 # src/agents/risk/arbiter.py
 """Risk arbiter node: run a bounded conservative<->aggressive debate (reusing WP-D's
 run_debate), then act as the fund manager — fold both stances into a FinalDecision that
-adjusts the trader's proposal. Persists the verdict to the memory cache (WP-C) if present."""
+adjusts the trader's proposal. Persists the verdict to the warehouse-backed cache (WP-2)."""
 from __future__ import annotations
 
 import json
@@ -17,10 +17,11 @@ from src.llm.factory import STRUCT_METHOD, get_llm
 from src.llm.schemas import FinalDecision
 from src.state import AgentState
 
-# --- store_verdict: WP-C owns it; guard so the graph runs if memory isn't merged. ---
+# --- store_verdict (WP-2: async, warehouse-backed); guard so the graph runs
+# --- even if the memory module is absent. ---
 try:
     from src.memory.cache import store_verdict
-except ImportError:  # pragma: no cover - exercised only pre-WP-C-merge
+except ImportError:  # pragma: no cover - exercised only without the memory module
     store_verdict = None  # type: ignore[assignment]
 
 _LOG = logging.getLogger(__name__)
@@ -131,12 +132,12 @@ async def risk_arbiter(state: AgentState) -> dict:
             "run_metrics": metrics,
         }
 
-    # 3. Persist to memory cache if WP-C is available (never break on failure).
+    # 3. Persist to the verdict cache if available (never break on failure).
     if store_verdict is not None:
         try:
-            store_verdict(ticker, decision)
-        except Exception as exc:  # pragma: no cover - defensive; cache must never break the run
-            _LOG.warning("risk_arbiter: store_verdict failed (%s); continuing", exc)
+            await store_verdict(ticker, decision)
+        except Exception as exc:  # defensive; cache must never break the run
+            _LOG.warning("risk_arbiter: store_verdict failed (%s); continuing", exc, exc_info=exc)
 
     adjustments = _derive_adjustments(proposal, decision)
     per_node = tracker.totals()["per_node"] or zero_metrics("risk_arbiter")

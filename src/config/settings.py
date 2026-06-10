@@ -43,8 +43,7 @@ class Settings(BaseSettings):
     risk_debate_rounds: int = 1
     debate_mode: Literal["on", "off"] = "on"
 
-    # Memory
-    chroma_dir: str = ".chroma"
+    # Memory (verdict cache is warehouse-backed; embeddings stay local/fastembed)
     embedding_model: str = "BAAI/bge-small-en-v1.5"
 
     # Observability

@@ -24,6 +24,7 @@ from src.warehouse.models import (
     PriceBar,
     Run,
     RunEvent,
+    Verdict,
 )
 
 
@@ -280,6 +281,31 @@ async def latest_finished_run(
         cutoff = _utcnow() - timedelta(hours=within_hours)
         stmt = stmt.where(Run.started_at >= cutoff)
     result = await session.execute(stmt)
+    return result.scalars().first()
+
+
+# --------------------------------------------------------------------- verdicts
+
+
+async def insert_verdict(
+    session: AsyncSession, ticker: str, decision: dict[str, Any], ts: datetime
+) -> Verdict:
+    """Persist a FinalDecision dump for ``ticker`` stamped with tz-aware ``ts``."""
+    row = Verdict(ticker=ticker, ts=ts, decision=decision)
+    session.add(row)
+    await session.flush()
+    return row
+
+
+async def latest_verdict(session: AsyncSession, ticker: str) -> Verdict | None:
+    """Newest verdict for ``ticker``: ORDER BY ts DESC, id DESC (deterministic
+    recency — never similarity search)."""
+    result = await session.execute(
+        select(Verdict)
+        .where(Verdict.ticker == ticker)
+        .order_by(Verdict.ts.desc(), Verdict.id.desc())
+        .limit(1)
+    )
     return result.scalars().first()
 
 

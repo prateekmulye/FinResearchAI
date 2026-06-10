@@ -21,6 +21,11 @@ from src.llm.schemas import DebateTurn, FinalDecision, RiskStance, TradeProposal
 # Helpers
 # ---------------------------------------------------------------------------
 
+
+async def _noop_store_verdict(*a, **k):
+    return None
+
+
 def _trade_state() -> dict:
     return {
         "ticker": "TSLA",
@@ -254,7 +259,7 @@ async def test_arbiter_happy_path_debate_included_in_metrics(monkeypatch):
 
     monkeypatch.setattr(arbiter_mod, "run_debate", _fake_run_debate)
     # Guard store_verdict from touching real storage
-    monkeypatch.setattr(arbiter_mod, "store_verdict", lambda *a, **k: None)
+    monkeypatch.setattr(arbiter_mod, "store_verdict", _noop_store_verdict)
 
     from src.agents.risk.arbiter import risk_arbiter
 
@@ -300,7 +305,7 @@ async def test_arbiter_degrade_on_final_decision_llm_failure(monkeypatch):
         return [], debate_metrics
 
     monkeypatch.setattr(arbiter_mod, "run_debate", _fake_run_debate)
-    monkeypatch.setattr(arbiter_mod, "store_verdict", lambda *a, **k: None)
+    monkeypatch.setattr(arbiter_mod, "store_verdict", _noop_store_verdict)
 
     from src.agents.risk.arbiter import risk_arbiter
 
@@ -356,7 +361,7 @@ async def test_arbiter_metrics_include_debate_metrics(monkeypatch):
         return [], debate_metrics_2
 
     monkeypatch.setattr(arbiter_mod, "run_debate", _fake_run_debate)
-    monkeypatch.setattr(arbiter_mod, "store_verdict", lambda *a, **k: None)
+    monkeypatch.setattr(arbiter_mod, "store_verdict", _noop_store_verdict)
 
     from src.agents.risk.arbiter import risk_arbiter
 

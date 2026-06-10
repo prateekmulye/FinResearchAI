@@ -34,6 +34,11 @@ LEGACY_PATHS = [
     "tests/test_flow.py",
     "tests/test_international.py",
     "tests/test_ui_logic.py",
+    # WP-2: embedded-Chroma memory replaced by the Postgres warehouse cache.
+    "src/memory/store.py",
+    "src/memory/reflection.py",
+    "tests/test_store.py",
+    "tests/test_reflection.py",
 ]
 
 
@@ -48,6 +53,16 @@ def _can_find(mod: str) -> bool:
         return importlib.util.find_spec(mod) is not None
     except ModuleNotFoundError:
         return False
+
+
+def test_no_chromadb_imports_under_src():
+    """WP-2 removed the chromadb dependency; no production module may import it."""
+    offenders = []
+    for py in (_REPO_ROOT / "src").rglob("*.py"):
+        text = py.read_text(encoding="utf-8")
+        if "import chromadb" in text or "from chromadb" in text:
+            offenders.append(str(py.relative_to(_REPO_ROOT)))
+    assert not offenders, f"chromadb imports found under src/: {offenders}"
 
 
 @pytest.mark.parametrize("mod", LEGACY_MODULES)

@@ -165,6 +165,22 @@ class EvalResult(Base):
     pairs: Mapped[Any] = mapped_column(JSON)
 
 
+class Verdict(Base):
+    """Cross-run verdict cache row (WP-2): the FinalDecision dump for a ticker.
+
+    Recency is deterministic — ORDER BY ts DESC (id DESC tie-break) — never
+    similarity search.
+    """
+
+    __tablename__ = "verdicts"
+    __table_args__ = (Index("ix_verdicts_ticker_ts", "ticker", "ts"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    ticker: Mapped[str] = mapped_column(String)
+    ts: Mapped[datetime]
+    decision: Mapped[dict[str, Any]] = mapped_column(JSON)
+
+
 class DemoQuota(Base):
     __tablename__ = "demo_quota"
     __table_args__ = (UniqueConstraint("key", "day", name="uq_demo_quota_key_day"),)

@@ -10,6 +10,10 @@ from scripts.smoke import run_stub
 from src.llm.schemas import AnalystReport, DebateTurn
 
 
+async def _no_cached_verdict(*a, **k):
+    return None
+
+
 def test_run_stub_returns_report_and_writes_trace(tmp_path):
     """Run the full graph offline (all LLM/tool calls mocked) and verify the trace."""
     from src.agents.router import TickerResolution
@@ -52,7 +56,7 @@ def test_run_stub_returns_report_and_writes_trace(tmp_path):
 
     with (
         patch.object(router_mod, "get_llm", lambda tier: _RouterLLM()),
-        patch.object(router_mod, "_get_cached_verdict", lambda *a, **k: None),
+        patch.object(router_mod, "_get_cached_verdict", _no_cached_verdict),
         patch.object(news_mod, "get_llm", lambda tier: _AnalystLLM()),
         patch.object(fund_mod, "get_llm", lambda tier: _AnalystLLM()),
         patch.object(tech_mod, "get_llm", lambda tier: _AnalystLLM()),

@@ -1,5 +1,6 @@
-# src/memory package — supersedes the legacy src/memory.py module.
-# WP-I will delete the legacy module.
+# src/memory package — warehouse-backed verdict cache (WP-2) + local embeddings.
+# The embedded-Chroma VectorStore was removed; the cache API below is the public
+# surface (src.memory.embeddings powers WP-9 pgvector semantic search).
+from src.memory.cache import get_cached_verdict, store_verdict
 
-# Backward-compat alias: old reporter.py imports VectorMemory (renamed to VectorStore in WP-D).
-from src.memory.store import VectorStore as VectorMemory  # noqa: F401
+__all__ = ["get_cached_verdict", "store_verdict"]

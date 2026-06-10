@@ -5,6 +5,10 @@ from src.agents.router import TickerResolution, router
 from src.llm.schemas import FinalDecision
 
 
+async def _no_cached_verdict(*a, **k):
+    return None
+
+
 class _FakeStructured:
     def __init__(self, result):
         self._result = result
@@ -32,7 +36,7 @@ def patch_llm(monkeypatch):
 
 async def test_router_resolves_and_plans(patch_llm, monkeypatch):
     # ensure no cache module short-circuits
-    monkeypatch.setattr(router_mod, "_get_cached_verdict", lambda *a, **k: None)
+    monkeypatch.setattr(router_mod, "_get_cached_verdict", _no_cached_verdict)
     patch_llm(TickerResolution(resolved_ticker="RELIANCE.NS", screener="india", exchange="NSE"))
     out = await router({"ticker": "RELIANCE", "investor_mode": "Neutral"})
     assert out["resolved_ticker"] == "RELIANCE.NS"
@@ -45,7 +49,7 @@ async def test_router_resolves_and_plans(patch_llm, monkeypatch):
 
 
 async def test_router_us_ticker(patch_llm, monkeypatch):
-    monkeypatch.setattr(router_mod, "_get_cached_verdict", lambda *a, **k: None)
+    monkeypatch.setattr(router_mod, "_get_cached_verdict", _no_cached_verdict)
     patch_llm(TickerResolution(resolved_ticker="AAPL", screener="america", exchange="NASDAQ"))
     out = await router({"ticker": "AAPL", "investor_mode": "Bullish"})
     assert out["resolved_ticker"] == "AAPL"
@@ -61,7 +65,11 @@ def test_ticker_resolution_schema_defaults():
 async def test_router_cache_short_circuits(patch_llm, monkeypatch):
     patch_llm(TickerResolution(resolved_ticker="AAPL", screener="america", exchange="NASDAQ"))
     cached = FinalDecision(action="BUY", conviction=0.7, score=72, rationale="cached")
-    monkeypatch.setattr(router_mod, "_get_cached_verdict", lambda ticker, max_age_min: cached)
+
+    async def _cached_verdict(ticker, max_age_min):
+        return cached
+
+    monkeypatch.setattr(router_mod, "_get_cached_verdict", _cached_verdict)
     out = await router({"ticker": "AAPL", "investor_mode": "Neutral"})
     assert out["final_decision"]["action"] == "BUY"
     assert out["final_decision"]["score"] == 72

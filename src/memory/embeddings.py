@@ -2,7 +2,8 @@
 """Local, key-free text embeddings (fastembed / BGE-small) behind a swap seam.
 
 The vector backend is isolated here so it can be swapped later (e.g. an
-Ollama Cloud /v1/embeddings client) without touching store.py or cache.py.
+Ollama Cloud /v1/embeddings client) without touching the WP-9 pgvector
+semantic-search layer (or cache.py) that consumes it.
 """
 from __future__ import annotations
 
@@ -37,7 +38,7 @@ class FastEmbedEmbedder:
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         # .embed() returns a generator of numpy float32 arrays; convert to
-        # plain python float lists for Chroma compatibility + JSON safety.
+        # plain python float lists for pgvector/JSON-column compatibility.
         return [vec.tolist() for vec in self._model.embed(texts)]
 
     def embed_one(self, text: str) -> list[float]:
@@ -58,5 +59,5 @@ def get_embedder() -> Embedder:
     except Exception as exc:
         raise RuntimeError(
             f"FastEmbed model load failed ({exc}). Check the ONNX model cache "
-            "or inject a custom embedder via store construction."
+            "or swap in a custom Embedder here for WP-9 pgvector semantic search."
         ) from exc

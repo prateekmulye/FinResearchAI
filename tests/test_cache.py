@@ -1,172 +1,102 @@
 # tests/test_cache.py
-import json
+"""Warehouse-backed verdict cache (WP-2): roundtrip, inclusive freshness boundary,
+newest-wins recency, disabled no-op behavior, and degrade-on-DB-error.
 
+Backend pattern: a file-backed SQLite URL (a `:memory:` aiosqlite URL gives each
+pooled connection a FRESH empty DB, so the file URL is the safe choice), env var
+via monkeypatch, ``reset_engine()`` around each test (engine has event-loop
+affinity), and ``bootstrap.create_all`` once per test DB.
+"""
+from __future__ import annotations
+
+import pytest
+
+from src.config import settings as settings_mod
 from src.llm.schemas import FinalDecision
-from src.memory import cache as cache_mod
 from src.memory.cache import get_cached_verdict, store_verdict
-
-
-class FakeEmbedder:
-    def embed(self, texts):
-        return [[1.0, 2.0, 3.0] for _ in texts]
-
-    def embed_one(self, text):
-        return [1.0, 2.0, 3.0]
-
-
-class FakeStore:
-    """In-memory stand-in for VectorStore that records calls.
-
-    `query_by` ONLY honors a metadata `where` filter — it has no similarity
-    path at all, which is what we assert the cache relies on.
-    """
-
-    def __init__(self):
-        self.rows = []
-        self.query_calls = []
-        self.add_calls = []
-
-    def add(self, doc, metadata):
-        self.add_calls.append((doc, metadata))
-        self.rows.append({"id": str(len(self.rows)), "document": doc, "metadata": metadata})
-        return self.rows[-1]["id"]
-
-    def query_by(self, where):
-        self.query_calls.append(where)
-        return [r for r in self.rows if all(r["metadata"].get(k) == v for k, v in where.items())]
+from src.warehouse import db as db_mod
+from src.warehouse.bootstrap import create_all
+from src.warehouse.db import get_engine, reset_engine, session_scope
+from src.warehouse.repos import insert_verdict
 
 
 def _decision(action="BUY", score=70):
     return FinalDecision(action=action, conviction=0.8, score=score, rationale="r")
 
 
-def test_store_then_fresh_hit():
-    store = FakeStore()
-    store_verdict("AAPL", _decision(), store=store, now=1000)
-    got = get_cached_verdict("AAPL", max_age_min=60, store=store, now=1000 + 30 * 60)  # 30 min old
+@pytest.fixture
+async def warehouse(monkeypatch, tmp_path):
+    """Enable the warehouse on a per-test SQLite file with the schema created."""
+    monkeypatch.setenv("DATABASE_URL", f"sqlite+aiosqlite:///{tmp_path}/cache.db")
+    settings_mod.get_settings.cache_clear()
+    await reset_engine()
+    await create_all(get_engine())
+    yield
+    await reset_engine()
+    settings_mod.get_settings.cache_clear()
+
+
+async def test_store_then_get_roundtrips_final_decision(warehouse):
+    decision = _decision()
+    await store_verdict("AAPL", decision, now=1000)
+
+    got = await get_cached_verdict("AAPL", max_age_min=60, now=1000 + 30 * 60)  # 30 min old
     assert got is not None
     assert isinstance(got, FinalDecision)
-    assert got.action == "BUY"
-    assert got.score == 70
+    assert got == decision
 
 
-def test_stale_miss():
-    store = FakeStore()
-    store_verdict("AAPL", _decision(), store=store, now=1000)
-    got = get_cached_verdict("AAPL", max_age_min=60, store=store, now=1000 + 61 * 60)  # 61 min old
-    assert got is None
+async def test_freshness_boundary_is_inclusive(warehouse):
+    await store_verdict("AAPL", _decision(score=42), now=1000)
+
+    at_limit = await get_cached_verdict("AAPL", max_age_min=60, now=1000 + 60 * 60)
+    assert at_limit is not None, "verdict exactly at max_age_min boundary must be fresh"
+    assert at_limit.score == 42
+
+    one_past = await get_cached_verdict("AAPL", max_age_min=60, now=1000 + 60 * 60 + 1)
+    assert one_past is None
 
 
-def test_empty_miss():
-    store = FakeStore()
-    assert get_cached_verdict("AAPL", max_age_min=60, store=store, now=1000) is None
+async def test_newest_verdict_wins(warehouse):
+    await store_verdict("AAPL", _decision(action="SELL", score=10), now=1000)
+    await store_verdict("AAPL", _decision(action="BUY", score=90), now=2000)  # newer
 
-
-def test_picks_newest_by_ts():
-    store = FakeStore()
-    store_verdict("AAPL", _decision(action="SELL", score=10), store=store, now=1000)
-    store_verdict("AAPL", _decision(action="BUY", score=90), store=store, now=2000)  # newer
-    got = get_cached_verdict("AAPL", max_age_min=1000, store=store, now=2000)
+    got = await get_cached_verdict("AAPL", max_age_min=1000, now=2000)
+    assert got is not None
     assert got.action == "BUY"
     assert got.score == 90
 
 
-def test_store_writes_ticker_and_ts_metadata():
-    store = FakeStore()
-    store_verdict("TSLA", _decision(), store=store, now=4242)
-    doc, meta = store.add_calls[0]
-    assert meta["ticker"] == "TSLA"
-    assert meta["ts"] == 4242
-    assert json.loads(doc)["action"] == "BUY"  # verdict serialized as JSON document
+async def test_miss_for_unknown_ticker(warehouse):
+    await store_verdict("AAPL", _decision(), now=1000)
+    assert await get_cached_verdict("ZZZZ", max_age_min=60, now=1000) is None
 
 
-def test_freshness_uses_metadata_where_not_similarity():
-    """Regression guard for the old defect: recency must be a metadata `where`
-    query keyed by ticker, NOT a semantic similarity search."""
-    store = FakeStore()
-    store_verdict("AAPL", _decision(), store=store, now=1000)
-    get_cached_verdict("AAPL", max_age_min=60, store=store, now=1000)
-    assert store.query_calls == [{"ticker": "AAPL"}]
-    # FakeStore has no query_texts/similarity method — the cache cannot have used one.
-    assert not hasattr(store, "query")
+async def test_disabled_warehouse_get_returns_none_and_store_noops():
+    # env_isolation (autouse) scrubbed DATABASE_URL -> warehouse disabled.
+    await store_verdict("AAPL", _decision(), now=1000)  # must not raise
+    assert await get_cached_verdict("AAPL", max_age_min=60, now=1000) is None
 
 
-def test_default_store_is_constructed_lazily(monkeypatch):
-    """When no store is injected, the cache builds a VectorStore on demand."""
-    built = {}
+async def test_db_error_degrades_get_to_none(warehouse, monkeypatch):
+    await store_verdict("AAPL", _decision(), now=1000)
 
-    class SpyStore(FakeStore):
-        def __init__(self, **kwargs):
-            super().__init__()
-            built["kwargs"] = kwargs
-            built["yes"] = True
+    def _boom():
+        raise RuntimeError("db down")
 
-    monkeypatch.setattr(cache_mod, "VectorStore", SpyStore)
-    store_verdict("NVDA", _decision(), now=7)  # no store= kwarg
-    assert built.get("yes") is True
-    # cache pins the collection explicitly (no reliance on the store's default).
-    assert built["kwargs"].get("collection") == "verdicts"
+    # session_scope() calls db.get_sessionmaker() internally; breaking it
+    # simulates a dead database for the lookup path.
+    monkeypatch.setattr(db_mod, "get_sessionmaker", _boom)
+    got = await get_cached_verdict("AAPL", max_age_min=60, now=1000)
+    assert got is None  # degrade, never raise into the graph
 
 
-def test_cache_end_to_end_against_real_chroma(tmp_path):
-    from src.memory.store import VectorStore
+async def test_corrupt_decision_payload_degrades_to_none(warehouse):
+    from datetime import UTC, datetime
 
-    store = VectorStore(persist_dir=str(tmp_path), collection="verdicts", embedder=FakeEmbedder())
-    store_verdict("AAPL", _decision(action="HOLD", score=55), store=store, now=10_000)
-
-    fresh = get_cached_verdict("AAPL", max_age_min=60, store=store, now=10_000 + 10 * 60)
-    assert fresh is not None and fresh.action == "HOLD" and fresh.score == 55
-
-    stale = get_cached_verdict("AAPL", max_age_min=5, store=store, now=10_000 + 10 * 60)
-    assert stale is None
-
-    missing = get_cached_verdict("ZZZZ", max_age_min=60, store=store, now=10_000)
-    assert missing is None
-
-
-def test_cache_end_to_end_newest_wins_real_chroma(tmp_path):
-    """F2: prove newest-wins against actual Chroma (which gives no row ordering).
-
-    Store an older verdict (score=10) then a newer verdict (score=99) for the
-    same ticker. Assert that get_cached_verdict returns the NEWER score.
-    """
-    from src.memory.store import VectorStore
-
-    store = VectorStore(persist_dir=str(tmp_path), collection="verdicts", embedder=FakeEmbedder())
-
-    # Older entry first
-    store_verdict("MSFT", _decision(action="SELL", score=10), store=store, now=5_000)
-    # Newer entry second (distinct score so we can tell them apart)
-    store_verdict("MSFT", _decision(action="BUY", score=99), store=store, now=6_000)
-
-    got = get_cached_verdict("MSFT", max_age_min=1000, store=store, now=6_000)
-    assert got is not None
-    assert got.score == 99, f"Expected newer score 99, got {got.score}"
-    assert got.action == "BUY"
-
-
-def test_corrupt_ts_does_not_raise(tmp_path):
-    """F1: a row with a non-numeric `ts` must not crash get_cached_verdict."""
-    store = FakeStore()
-    # Store a good verdict
-    store_verdict("AAPL", _decision(action="BUY", score=80), store=store, now=2000)
-    # Inject a row with a corrupt ts directly into the fake store
-    import json
-
-    bad_doc = json.dumps(_decision(action="SELL", score=1).model_dump())
-    store.rows.append({"id": "corrupt", "document": bad_doc, "metadata": {"ticker": "AAPL", "ts": "bad"}})
-
-    # Must not raise; should return the good verdict (ts=2000 beats ts="bad"→0)
-    got = get_cached_verdict("AAPL", max_age_min=1000, store=store, now=2000)
-    assert got is not None
-    assert got.score == 80
-
-
-def test_boundary_exactly_at_limit_is_fresh():
-    """F4: a verdict stored at now=1000, queried at now=1000+60*60 is still fresh
-    (exactly at the limit is inclusive)."""
-    store = FakeStore()
-    store_verdict("AAPL", _decision(action="BUY", score=42), store=store, now=1000)
-    got = get_cached_verdict("AAPL", max_age_min=60, store=store, now=1000 + 60 * 60)
-    assert got is not None, "Verdict exactly at max_age_min boundary should be fresh"
-    assert got.score == 42
+    async with session_scope() as session:
+        await insert_verdict(
+            session, "AAPL", {"garbage": True}, datetime.fromtimestamp(1000, tz=UTC)
+        )
+    got = await get_cached_verdict("AAPL", max_age_min=60, now=1000)
+    assert got is None  # invalid FinalDecision dump must not raise

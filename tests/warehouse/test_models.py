@@ -23,6 +23,7 @@ from src.warehouse.models import (
     PriceBar,
     Run,
     RunEvent,
+    Verdict,
 )
 
 TS = datetime(2026, 6, 10, 12, 0, 0, tzinfo=UTC)
@@ -220,3 +221,8 @@ async def test_datetime_columns_return_utc_aware_on_sqlite(engine):
 def test_news_items_has_instrument_ts_index():
     names = {ix.name for ix in NewsItem.__table__.indexes}
     assert "ix_news_items_instrument_id_ts" in names
+
+
+def test_verdicts_has_ticker_ts_index():
+    names = {ix.name for ix in Verdict.__table__.indexes}
+    assert "ix_verdicts_ticker_ts" in names

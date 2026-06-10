@@ -14,10 +14,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-memory = [
-    "chromadb==1.5.9",
-    "fastembed==0.8.0",
-]
 web     = ["firecrawl-py==4.28.2"]
 data    = ["yfinance==0.2.66", "tradingview-ta==3.3.0"]
 api = [
@@ -32,6 +28,8 @@ db = [
     "alembic>=1.13,<2.0",
     "pgvector>=0.3,<1.0",
     "greenlet>=3.0",
+    # Embeddings live with the warehouse: fastembed powers WP-9 pgvector search.
+    "fastembed==0.8.0",
 ]
 dev = [
     "pytest==8.4.2",
@@ -44,7 +42,6 @@ dev = [
 ]
 # Aggregate group CI installs so lint/type-check/tests see every import path.
 all = [
-    "finresearchai[memory]",
     "finresearchai[web]",
     "finresearchai[data]",
     "finresearchai[api]",
