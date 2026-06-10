@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _MODELS_YAML = Path(__file__).parent / "models.yaml"
@@ -60,6 +61,21 @@ class Settings(BaseSettings):
     # when the warehouse is enabled too.
     collector_enabled: bool = False
     collector_interval_hours: int = 24
+
+    # API demo guard (WP-5, additive): daily live-run caps enforced by
+    # src/api/demo_guard.py (warehouse-backed; no-op when warehouse disabled).
+    # ADMIN_TOKEN unlocks the X-Admin-Token bypass; unset/empty = no bypass.
+    admin_token: str | None = None
+    demo_runs_per_ip_per_day: int = 3
+    demo_runs_global_per_day: int = 25
+
+    # Fake-LLM demo mode (WP-5, additive): APP_FAKE_LLM=1 makes get_llm() return
+    # a deterministic offline fake and the tool fetchers return canned data —
+    # zero-quota demos and offline e2e tests. The env var is APP_-prefixed to
+    # make the "this is an app-level demo switch" intent explicit.
+    fake_llm: bool = Field(
+        default=False, validation_alias=AliasChoices("app_fake_llm", "fake_llm")
+    )
 
     def apply_model_yaml(self, tiers: dict[str, dict[str, Any]] | None = None) -> "Settings":
         """Fill model/temperature from models.yaml ONLY where env didn't override."""

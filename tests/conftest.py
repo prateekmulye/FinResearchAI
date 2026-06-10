@@ -295,6 +295,11 @@ def env_isolation(monkeypatch):
         "DB_ECHO",
         "COLLECTOR_ENABLED",
         "COLLECTOR_INTERVAL_HOURS",
+        "ADMIN_TOKEN",
+        "DEMO_RUNS_PER_IP_PER_DAY",
+        "DEMO_RUNS_GLOBAL_PER_DAY",
+        "APP_FAKE_LLM",
+        "FAKE_LLM",
     ):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("RUN_LIVE", "0")

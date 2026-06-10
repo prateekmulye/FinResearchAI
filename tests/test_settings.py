@@ -23,6 +23,7 @@ def test_load_model_tiers_reads_yaml(tmp_path):
 # WP-1 (flagship elevation, spec-sanctioned ADDITIVE change): database_url + db_echo.
 # WP-2 (spec-sanctioned REMOVAL): chroma_dir is gone with the Chroma backend.
 # WP-3 (ADDITIVE): collector_enabled + collector_interval_hours (scheduled collector).
+# WP-5 (ADDITIVE): admin_token + demo daily caps + fake_llm (APP_FAKE_LLM demo mode).
 _CONTRACT_FIELDS = {
     "llm_provider", "llm_base_url", "ollama_api_key", "firecrawl_api_key",
     "quick_model", "deep_model", "quick_temperature", "deep_temperature",
@@ -30,6 +31,7 @@ _CONTRACT_FIELDS = {
     "embedding_model", "runs_dir", "langsmith_enabled",
     "database_url", "db_echo",
     "collector_enabled", "collector_interval_hours",
+    "admin_token", "demo_runs_per_ip_per_day", "demo_runs_global_per_day", "fake_llm",
 }
 
 
@@ -53,6 +55,32 @@ def test_settings_exposes_all_contract_fields(monkeypatch):
     # WP-3 collector fields: opt-in, daily by default.
     assert s.collector_enabled is False
     assert s.collector_interval_hours == 24
+    # WP-5 demo-guard fields: no admin token, conservative daily caps, fake mode off.
+    assert s.admin_token is None
+    assert s.demo_runs_per_ip_per_day == 3
+    assert s.demo_runs_global_per_day == 25
+    assert s.fake_llm is False
+
+
+def test_settings_wp5_reads_env(monkeypatch):
+    monkeypatch.setenv("ADMIN_TOKEN", "sekrit")
+    monkeypatch.setenv("DEMO_RUNS_PER_IP_PER_DAY", "7")
+    monkeypatch.setenv("DEMO_RUNS_GLOBAL_PER_DAY", "99")
+    monkeypatch.setenv("APP_FAKE_LLM", "1")
+    s = Settings(_env_file=None)
+    assert s.admin_token == "sekrit"
+    assert s.demo_runs_per_ip_per_day == 7
+    assert s.demo_runs_global_per_day == 99
+    assert s.fake_llm is True
+
+
+def test_settings_fake_llm_env_var_is_app_prefixed(monkeypatch):
+    # The flag's env var is APP_FAKE_LLM (the constructor still accepts fake_llm=).
+    monkeypatch.setenv("APP_FAKE_LLM", "true")
+    assert Settings(_env_file=None).fake_llm is True
+    monkeypatch.delenv("APP_FAKE_LLM")
+    assert Settings(_env_file=None).fake_llm is False
+    assert Settings(_env_file=None, fake_llm=True).fake_llm is True
 
 
 def test_settings_collector_reads_env(monkeypatch):
