@@ -9,6 +9,7 @@ multiple replicas don't sweep yfinance in lockstep.
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime, timedelta
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
@@ -35,6 +36,10 @@ def create_scheduler() -> AsyncIOScheduler:
         name="warehouse collector sweep",
         max_instances=1,
         coalesce=True,
+        # Without this the FIRST sweep would be a full interval (hours) away:
+        # prime a fresh process ~5 minutes after boot. The staleness guards in
+        # collect_once make an early sweep cheap.
+        next_run_time=datetime.now(UTC) + timedelta(minutes=5),
     )
     return scheduler
 

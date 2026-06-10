@@ -4,10 +4,11 @@ collector_enabled AND warehouse_enabled start gate. Jobs are never fired here
 (interval is hours-scale; nothing sleeps)."""
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 from src.collector import scheduler as scheduler_mod
 from src.collector.scheduler import create_scheduler, start_collector, stop_collector
+from src.collector.service import collect_once
 from src.config import settings as settings_mod
 
 
@@ -15,12 +16,19 @@ def test_create_scheduler_configures_interval_job(monkeypatch):
     monkeypatch.setenv("COLLECTOR_INTERVAL_HOURS", "6")
     settings_mod.get_settings.cache_clear()
 
+    before = datetime.now(UTC)
     sched = create_scheduler()
+    after = datetime.now(UTC)
+
     jobs = sched.get_jobs()
     assert len(jobs) == 1
+    assert jobs[0].func is collect_once  # pin the wiring
     trigger = jobs[0].trigger
     assert trigger.interval == timedelta(hours=6)
     assert trigger.jitter == 300
+    # First sweep is primed ~5 minutes after boot, not a full interval away.
+    five_min = timedelta(minutes=5)
+    assert before + five_min <= jobs[0].next_run_time <= after + five_min
     assert not sched.running  # create only configures; start is separate
 
 

@@ -62,7 +62,11 @@ async def test_collect_once_sweeps_watched_instruments(sqlite_warehouse, caplog)
     assert summary["errors"] == []
     assert await _count(PriceBar) == 6
     assert await _count(FundamentalsSnapshot) == 2
-    assert any("collector" in r.message for r in caplog.records), "INFO summary line expected"
+    # The summary line reports ok/errors explicitly ("instruments" counts only
+    # fully-successful tickers, so the log must not imply a total).
+    assert any("ok=2 errors=0" in r.getMessage() for r in caplog.records), (
+        "INFO summary line with ok=N errors=M expected"
+    )
 
 
 async def test_collect_once_isolates_per_instrument_failure(sqlite_warehouse):
@@ -81,7 +85,7 @@ async def test_collect_once_isolates_per_instrument_failure(sqlite_warehouse):
 
     summary = await collect_once(fetch=price_fetch, fundamentals_fetch=fundamentals_fetch)
 
-    assert summary["errors"] == ["BAD"]
+    assert summary["errors"] == ["BAD (NASDAQ)"]  # "TICKER (EXCHANGE)" strings
     assert summary["instruments"] == 1   # only the healthy ticker completed
     assert summary["fundamentals"] == 1
     assert await _count(FundamentalsSnapshot) == 1

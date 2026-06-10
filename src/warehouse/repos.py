@@ -114,7 +114,12 @@ async def list_watched(session: AsyncSession) -> list[Instrument]:
 async def bulk_upsert_price_bars(
     session: AsyncSession, instrument_id: int, bars: list[dict[str, Any]]
 ) -> int:
-    """Idempotent bulk insert; ON CONFLICT (instrument_id, interval, ts) DO NOTHING.
+    """Idempotent bulk upsert; ON CONFLICT (instrument_id, interval, ts) DO UPDATE.
+
+    Re-fetched bars win: OHLCV columns take the incoming (excluded) values, so a
+    partial intraday bar captured mid-session is corrected by the next refresh
+    instead of frozen forever. Both the sqlite and postgresql dialect inserts
+    support ``on_conflict_do_update``/``excluded``.
 
     Returns the attempted (input) count, not the inserted count.
     """
@@ -136,10 +141,16 @@ async def bulk_upsert_price_bars(
         for bar in bars
     ]
     insert = _dialect_insert(session)
-    stmt = (
-        insert(PriceBar)
-        .values(rows)
-        .on_conflict_do_nothing(index_elements=["instrument_id", "interval", "ts"])
+    stmt = insert(PriceBar).values(rows)
+    stmt = stmt.on_conflict_do_update(
+        index_elements=["instrument_id", "interval", "ts"],
+        set_={
+            "open": stmt.excluded.open,
+            "high": stmt.excluded.high,
+            "low": stmt.excluded.low,
+            "close": stmt.excluded.close,
+            "volume": stmt.excluded.volume,
+        },
     )
     await session.execute(stmt)
     return len(rows)

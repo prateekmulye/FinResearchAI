@@ -68,6 +68,9 @@ async def collect_once(
             summary["prices_rows"] += await refresh_prices(
                 ticker, exchange, screener, fetch=fetch
             )
+            # fundamentals_stale's 24h default is intentionally independent of
+            # collector_interval_hours: snapshots refresh at most ~daily even
+            # when the sweep runs more frequently.
             if await fundamentals_stale(ticker, exchange):
                 snapshot = await fetch_fund(ticker)
                 if await record_fundamentals(ticker, exchange, screener, snapshot):
@@ -75,13 +78,16 @@ async def collect_once(
             summary["instruments"] += 1
         except Exception as exc:
             # One bad ticker never stops the sweep.
-            _LOG.warning("collector: sweep failed for %s: %s", ticker, exc, exc_info=exc)
-            summary["errors"].append(ticker)
+            _LOG.warning(
+                "collector: sweep failed for %s (%s): %s", ticker, exchange, exc, exc_info=exc
+            )
+            summary["errors"].append(f"{ticker} ({exchange})")
 
+    # "instruments" counts only fully-successful tickers, so report ok/errors
+    # explicitly rather than implying a processed total.
     _LOG.info(
-        "collector sweep complete: %d instruments, %d price rows, %d fundamentals, "
-        "%d errors %s",
-        summary["instruments"], summary["prices_rows"], summary["fundamentals"],
-        len(summary["errors"]), summary["errors"],
+        "collector sweep complete: ok=%d errors=%d (%d price rows, %d fundamentals) %s",
+        summary["instruments"], len(summary["errors"]),
+        summary["prices_rows"], summary["fundamentals"], summary["errors"],
     )
     return summary

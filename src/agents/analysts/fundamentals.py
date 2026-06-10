@@ -8,6 +8,7 @@ STRUCT_METHOD is imported from src.llm.factory per COORDINATION §7.5.
 from __future__ import annotations
 
 import asyncio
+import logging
 import warnings
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -25,6 +26,7 @@ _SYSTEM = """You are a fundamentals analyst. Given a company's financial metrics
 points, and give a confidence in [0,1]. Reason only from the numbers provided."""
 
 _NODE = "fundamentals_analyst"
+_LOG = logging.getLogger(__name__)
 
 
 def _degraded(reason: str) -> AnalystReport:
@@ -53,42 +55,57 @@ async def fundamentals_analyst(state: dict) -> dict:
 
     # Write-through (WP-3): persist the snapshot, and backfill daily price bars
     # only when missing/stale (>24h) so a freshly analyzed ticker shows charts in
-    # the Market Explorer without waiting for the nightly collector. These calls
-    # are deliberately bare (no try/except): the ingest layer never raises — it
-    # no-ops when the warehouse is disabled and logs+degrades on any DB/fetch
-    # error — so it cannot affect the report, metrics, or state contract.
+    # the Market Explorer without waiting for the nightly collector. Scheduled as
+    # a background task right after the tool fetch and awaited only AFTER the LLM
+    # call completes, so warehouse I/O never sits on the LLM critical path. Safe
+    # because the ingest layer never raises — it no-ops when the warehouse is
+    # disabled and logs+degrades on any DB/fetch error — so it cannot affect the
+    # report, metrics, or state contract.
     screener = state.get("screener", "america")
     exchange = state.get("exchange", "NASDAQ")
-    await record_fundamentals(ticker, exchange, screener, data)
-    if await prices_stale(ticker, exchange):
-        await refresh_prices(ticker, exchange, screener)
 
-    llm = get_llm("quick").with_structured_output(AnalystReport, method=STRUCT_METHOD)
-    messages = [
-        SystemMessage(content=_SYSTEM),
-        HumanMessage(content=f"Ticker: {ticker}\nMetrics: {data}"),
-    ]
+    async def _write_through() -> None:
+        await record_fundamentals(ticker, exchange, screener, data)
+        if await prices_stale(ticker, exchange):
+            await refresh_prices(ticker, exchange, screener)
+
+    write_task = asyncio.create_task(_write_through())
+
     try:
-        report: AnalystReport = await llm.ainvoke(messages, config={"callbacks": [tracker]})
-    except Exception as exc:  # LLM failure degrades gracefully
+        llm = get_llm("quick").with_structured_output(AnalystReport, method=STRUCT_METHOD)
+        messages = [
+            SystemMessage(content=_SYSTEM),
+            HumanMessage(content=f"Ticker: {ticker}\nMetrics: {data}"),
+        ]
+        try:
+            report: AnalystReport = await llm.ainvoke(messages, config={"callbacks": [tracker]})
+        except Exception as exc:  # LLM failure degrades gracefully
+            return {
+                "analyst_reports": {"fundamentals": _degraded(f"LLM error: {exc}").model_dump()},
+                "run_metrics": _zero_metrics(),
+            }
+
+        # Attach raw numbers for the reporter; preserve any LLM-provided data too.
+        merged = {**data, **(report.data or {})}
+        report = report.model_copy(update={"data": merged})
+
+        # Happy path: an LLM call was made; warn if no cost was recorded.
+        per_node = tracker.totals()["per_node"]
+        if not per_node:
+            warnings.warn(
+                f"{_NODE}: no LLM cost recorded; on_llm_end may not have fired",
+                stacklevel=2,
+            )
+            per_node = _zero_metrics()
         return {
-            "analyst_reports": {"fundamentals": _degraded(f"LLM error: {exc}").model_dump()},
-            "run_metrics": _zero_metrics(),
+            "analyst_reports": {"fundamentals": report.model_dump()},
+            "run_metrics": per_node,
         }
-
-    # Attach raw numbers for the reporter; preserve any LLM-provided data too.
-    merged = {**data, **(report.data or {})}
-    report = report.model_copy(update={"data": merged})
-
-    # Happy path: an LLM call was made; warn if no cost was recorded.
-    per_node = tracker.totals()["per_node"]
-    if not per_node:
-        warnings.warn(
-            f"{_NODE}: no LLM cost recorded; on_llm_end may not have fired",
-            stacklevel=2,
-        )
-        per_node = _zero_metrics()
-    return {
-        "analyst_reports": {"fundamentals": report.model_dump()},
-        "run_metrics": per_node,
-    }
+    finally:
+        # Never leak the task: awaited on every exit (happy, degraded, raising).
+        # Ingest never raises by contract, but guard anyway so a broken invariant
+        # can't crash the node or clobber its return value from this finally.
+        try:
+            await write_task
+        except Exception as exc:
+            _LOG.warning("%s: warehouse write-through failed: %s", _NODE, exc, exc_info=exc)

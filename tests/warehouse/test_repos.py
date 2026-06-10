@@ -123,9 +123,23 @@ async def test_bulk_upsert_price_bars_idempotent(session):
     assert await bulk_upsert_price_bars(session, inst.id, bars) == 2
     assert await _count(session, PriceBar) == 2
 
-    # Re-inserting the same bars is a no-op (ON CONFLICT DO NOTHING).
+    # Re-inserting the same bars keeps the count stable (conflict, no new rows).
     assert await bulk_upsert_price_bars(session, inst.id, bars) == 2  # attempted count
     assert await _count(session, PriceBar) == 2
+
+    # Re-inserting a changed bar UPDATES in place (ON CONFLICT DO UPDATE): a
+    # partial intraday bar gets corrected on the next refresh, count stable.
+    corrected = {**bars[1], "close": 9.9, "high": 9.95, "volume": 999}
+    assert await bulk_upsert_price_bars(session, inst.id, [corrected]) == 1
+    assert await _count(session, PriceBar) == 2
+    row = (
+        await session.execute(
+            select(PriceBar).where(PriceBar.ts == TS + timedelta(days=1))
+        )
+    ).scalar_one()
+    assert row.close == 9.9
+    assert row.high == 9.95
+    assert row.volume == 999
 
     assert await bulk_upsert_price_bars(session, inst.id, []) == 0
 

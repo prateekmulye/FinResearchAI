@@ -5,6 +5,7 @@ STRUCT_METHOD is imported from src.llm.factory per COORDINATION §7.5.
 from __future__ import annotations
 
 import asyncio
+import logging
 import warnings
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -23,6 +24,7 @@ confidence in [0,1], and the source URLs as citations. Be factual; do not invent
 news that is not in the provided material."""
 
 _NODE = "news_analyst"
+_LOG = logging.getLogger(__name__)
 
 
 def _degraded(reason: str) -> AnalystReport:
@@ -55,39 +57,53 @@ async def news_analyst(state: dict) -> dict:
         }
 
     # Write-through (WP-3): persist the fetched headlines (deduped by url in the
-    # warehouse). Deliberately a bare call (no try/except): record_news never
-    # raises — it no-ops when the warehouse is disabled and logs+degrades on any
-    # DB error — so it cannot affect the report, metrics, or state contract.
-    await record_news(
-        ticker,
-        state.get("exchange", "NASDAQ"),
-        state.get("screener", "america"),
-        [{"title": h.title, "url": h.url, "snippet": h.snippet} for h in hits],
-    )
-
-    material = "\n".join(f"- {h.title} ({h.url}): {h.snippet}" for h in hits)
-    llm = get_llm("quick").with_structured_output(AnalystReport, method=STRUCT_METHOD)
-    messages = [
-        SystemMessage(content=_SYSTEM),
-        HumanMessage(content=f"Ticker: {ticker}\nHeadlines:\n{material}"),
-    ]
-    try:
-        report: AnalystReport = await llm.ainvoke(messages, config={"callbacks": [tracker]})
-    except Exception as exc:  # LLM failure degrades gracefully
-        return {
-            "analyst_reports": {"news": _degraded(f"LLM error: {exc}").model_dump()},
-            "run_metrics": _zero_metrics(),
-        }
-
-    # Happy path: an LLM call was made; warn if no cost was recorded.
-    per_node = tracker.totals()["per_node"]
-    if not per_node:
-        warnings.warn(
-            f"{_NODE}: no LLM cost recorded; on_llm_end may not have fired",
-            stacklevel=2,
+    # warehouse). Scheduled as a background task right after the tool fetch and
+    # awaited only AFTER the LLM call completes, so warehouse I/O never sits on
+    # the LLM critical path. Safe because record_news never raises — it no-ops
+    # when the warehouse is disabled and logs+degrades on any DB error — so it
+    # cannot affect the report, metrics, or state contract.
+    async def _write_through() -> None:
+        await record_news(
+            ticker,
+            state.get("exchange", "NASDAQ"),
+            state.get("screener", "america"),
+            [{"title": h.title, "url": h.url, "snippet": h.snippet} for h in hits],
         )
-        per_node = _zero_metrics()
-    return {
-        "analyst_reports": {"news": report.model_dump()},
-        "run_metrics": per_node,
-    }
+
+    write_task = asyncio.create_task(_write_through())
+
+    try:
+        material = "\n".join(f"- {h.title} ({h.url}): {h.snippet}" for h in hits)
+        llm = get_llm("quick").with_structured_output(AnalystReport, method=STRUCT_METHOD)
+        messages = [
+            SystemMessage(content=_SYSTEM),
+            HumanMessage(content=f"Ticker: {ticker}\nHeadlines:\n{material}"),
+        ]
+        try:
+            report: AnalystReport = await llm.ainvoke(messages, config={"callbacks": [tracker]})
+        except Exception as exc:  # LLM failure degrades gracefully
+            return {
+                "analyst_reports": {"news": _degraded(f"LLM error: {exc}").model_dump()},
+                "run_metrics": _zero_metrics(),
+            }
+
+        # Happy path: an LLM call was made; warn if no cost was recorded.
+        per_node = tracker.totals()["per_node"]
+        if not per_node:
+            warnings.warn(
+                f"{_NODE}: no LLM cost recorded; on_llm_end may not have fired",
+                stacklevel=2,
+            )
+            per_node = _zero_metrics()
+        return {
+            "analyst_reports": {"news": report.model_dump()},
+            "run_metrics": per_node,
+        }
+    finally:
+        # Never leak the task: awaited on every exit (happy, degraded, raising).
+        # Ingest never raises by contract, but guard anyway so a broken invariant
+        # can't crash the node or clobber its return value from this finally.
+        try:
+            await write_task
+        except Exception as exc:
+            _LOG.warning("%s: warehouse write-through failed: %s", _NODE, exc, exc_info=exc)

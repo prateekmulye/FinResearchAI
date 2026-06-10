@@ -93,6 +93,10 @@ async def router(state: dict) -> dict:
         # warehouse is disabled and logs+degrades on any DB error — so a DB
         # problem cannot affect routing. The degraded path above is skipped:
         # an unverified default resolution must not pollute the instruments table.
+        # Known limitation: ``exchange`` comes straight from the LLM resolution;
+        # a wrong exchange (e.g. the NASDAQ default for an NYSE-listed name)
+        # splits an instrument across two (ticker, exchange) rows. Exchange
+        # normalization is deferred to the debt-sweep WP.
         await ensure_instrument(
             resolution.resolved_ticker, resolution.exchange, resolution.screener
         )

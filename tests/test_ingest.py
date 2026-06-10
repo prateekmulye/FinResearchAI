@@ -189,9 +189,31 @@ async def test_refresh_prices_inserts_then_fetches_incrementally(sqlite_warehous
 
     inserted = await refresh_prices("AAPL", "NASDAQ", "america", fetch=fetch)
     assert inserted == 2
-    # Second call is incremental: start strictly after the newest first-batch ts.
+    # Second call is incremental: start AT the newest stored ts (not after it),
+    # so the newest day — possibly a partial intraday bar — is re-fetched.
     newest_first = max(b["ts"] for b in first_batch)
-    assert calls[1] > newest_first
+    assert calls[1] == newest_first
+
+
+async def test_refresh_prices_refetches_newest_and_corrects_partial_bar(sqlite_warehouse):
+    """A partial intraday bar must not be frozen forever: the second refresh
+    re-requests from the newest stored ts and the corrected OHLCV wins
+    (ON CONFLICT DO UPDATE), without duplicating the row."""
+    partial = _bars(3, NOW - timedelta(days=3))
+    corrected = {**partial[-1], "close": 99.0, "high": 99.5, "volume": 999}
+    fetch, calls = _make_fetch([partial, [corrected]])
+
+    assert await refresh_prices("AAPL", "NASDAQ", "america", fetch=fetch) == 3
+    assert await refresh_prices("AAPL", "NASDAQ", "america", fetch=fetch) == 1
+    assert calls[1] == partial[-1]["ts"]  # re-fetch starts at the newest stored day
+
+    assert await _count(PriceBar) == 3  # corrected in place, not duplicated
+    async with session_scope() as session:
+        rows = {bar.ts: bar for bar in (await session.execute(select(PriceBar))).scalars()}
+    row = rows[partial[-1]["ts"]]
+    assert row.close == 99.0  # corrected close wins
+    assert row.high == 99.5
+    assert row.volume == 999
 
 
 async def test_refresh_prices_normalizes_naive_timestamps(sqlite_warehouse):
@@ -239,6 +261,24 @@ async def test_prices_stale_lifecycle(sqlite_warehouse):
     await refresh_prices("AAPL", "NASDAQ", "america", fetch=fetch)
     assert await prices_stale("AAPL", "NASDAQ") is False
     assert await prices_stale("AAPL", "NASDAQ", max_age_hours=0) is True
+
+
+async def test_prices_stale_ignores_non_daily_bars(sqlite_warehouse):
+    """Staleness must agree with refresh_prices (which only stores 1d bars): a
+    fresh intraday bar at another interval must not mask daily staleness."""
+    from src.warehouse.repos import bulk_upsert_price_bars, upsert_instrument
+
+    async with session_scope() as session:
+        inst = await upsert_instrument(
+            session, ticker="AAPL", exchange="NASDAQ", screener="america"
+        )
+        await bulk_upsert_price_bars(
+            session,
+            inst.id,
+            [{"ts": datetime.now(UTC), "interval": "1h", "open": 1.0, "high": 1.0,
+              "low": 1.0, "close": 1.0}],
+        )
+    assert await prices_stale("AAPL", "NASDAQ") is True  # no 1d bars yet
 
 
 async def test_stale_helpers_db_error_degrades_to_false(sqlite_warehouse, monkeypatch, caplog):

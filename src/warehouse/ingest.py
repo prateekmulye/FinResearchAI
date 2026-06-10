@@ -220,9 +220,11 @@ async def refresh_prices(
 ) -> int:
     """Fetch daily OHLCV bars and bulk-upsert them; returns rows attempted.
 
-    Incremental: when the instrument already has 1d bars, only bars after the
-    newest stored ts are requested (start = newest + 1 day); otherwise the
-    backfill window is ``period_days`` ago. The fetch runs OUTSIDE any DB
+    Incremental: when the instrument already has 1d bars, the fetch starts AT
+    the newest stored ts (start = newest, NOT newest + 1 day) so the newest
+    day — possibly captured mid-session as a partial intraday bar — is
+    re-fetched and corrected by the ON CONFLICT DO UPDATE upsert; otherwise
+    the backfill window is ``period_days`` ago. The fetch runs OUTSIDE any DB
     session (no transaction held across network I/O). Bar timestamps are
     normalized to aware-UTC and inserts are chunked at 2000 rows.
     """
@@ -244,7 +246,9 @@ async def refresh_prices(
                 )
             ).scalar_one_or_none()
 
-        start = newest + timedelta(days=1) if newest else _utcnow() - timedelta(days=period_days)
+        # Start AT the newest stored day (not +1) so a partial intraday bar is
+        # re-fetched and corrected by the upsert instead of frozen forever.
+        start = newest if newest else _utcnow() - timedelta(days=period_days)
         bars = await fetch(ticker, start)
         if not bars:
             return 0
@@ -280,14 +284,18 @@ async def _newest_ts(model: Any, ticker: str, exchange: str) -> datetime | None:
         ).scalar_one_or_none()
         if instrument_id is None:
             return None
-        return (
-            await session.execute(
-                select(model.ts)
-                .where(model.instrument_id == instrument_id)
-                .order_by(model.ts.desc())
-                .limit(1)
-            )
-        ).scalar_one_or_none()
+        stmt = (
+            select(model.ts)
+            .where(model.instrument_id == instrument_id)
+            .order_by(model.ts.desc())
+            .limit(1)
+        )
+        if model is PriceBar:
+            # Staleness must agree with what refresh_prices stores (1d bars
+            # only): scope the newest-ts lookup to interval == "1d" so a stray
+            # intraday row can never mask daily-bar staleness.
+            stmt = stmt.where(PriceBar.interval == "1d")
+        return (await session.execute(stmt)).scalar_one_or_none()
 
 
 async def _stale(model: Any, ticker: str, exchange: str, max_age_hours: int, label: str) -> bool:
