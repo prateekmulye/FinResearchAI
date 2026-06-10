@@ -15,6 +15,7 @@ from src.llm.factory import STRUCT_METHOD, get_llm
 from src.llm.schemas import AnalystReport
 from src.tools import ToolError
 from src.tools.firecrawl import search_news
+from src.warehouse.ingest import record_news
 
 _SYSTEM = """You are a financial news analyst. Given recent web headlines and
 snippets about a stock, produce a concise sentiment summary, 3-5 key points, a
@@ -52,6 +53,17 @@ async def news_analyst(state: dict) -> dict:
             "analyst_reports": {"news": _degraded("no results").model_dump()},
             "run_metrics": _zero_metrics(),
         }
+
+    # Write-through (WP-3): persist the fetched headlines (deduped by url in the
+    # warehouse). Deliberately a bare call (no try/except): record_news never
+    # raises — it no-ops when the warehouse is disabled and logs+degrades on any
+    # DB error — so it cannot affect the report, metrics, or state contract.
+    await record_news(
+        ticker,
+        state.get("exchange", "NASDAQ"),
+        state.get("screener", "america"),
+        [{"title": h.title, "url": h.url, "snippet": h.snippet} for h in hits],
+    )
 
     material = "\n".join(f"- {h.title} ({h.url}): {h.snippet}" for h in hits)
     llm = get_llm("quick").with_structured_output(AnalystReport, method=STRUCT_METHOD)

@@ -18,6 +18,7 @@ from src.llm.factory import STRUCT_METHOD, get_llm
 from src.llm.schemas import AnalystReport
 from src.tools import ToolError
 from src.tools.yfinance import fetch_fundamentals
+from src.warehouse.ingest import prices_stale, record_fundamentals, refresh_prices
 
 _SYSTEM = """You are a fundamentals analyst. Given a company's financial metrics
 (P/E, growth, margins, dividend, beta), summarize financial health, list 3-5 key
@@ -49,6 +50,19 @@ async def fundamentals_analyst(state: dict) -> dict:
         }
 
     data = f.to_dict()
+
+    # Write-through (WP-3): persist the snapshot, and backfill daily price bars
+    # only when missing/stale (>24h) so a freshly analyzed ticker shows charts in
+    # the Market Explorer without waiting for the nightly collector. These calls
+    # are deliberately bare (no try/except): the ingest layer never raises — it
+    # no-ops when the warehouse is disabled and logs+degrades on any DB/fetch
+    # error — so it cannot affect the report, metrics, or state contract.
+    screener = state.get("screener", "america")
+    exchange = state.get("exchange", "NASDAQ")
+    await record_fundamentals(ticker, exchange, screener, data)
+    if await prices_stale(ticker, exchange):
+        await refresh_prices(ticker, exchange, screener)
+
     llm = get_llm("quick").with_structured_output(AnalystReport, method=STRUCT_METHOD)
     messages = [
         SystemMessage(content=_SYSTEM),

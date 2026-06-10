@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from src.agents._metrics import zero_metrics
 from src.llm.cost import CostTracker
 from src.llm.factory import STRUCT_METHOD, get_llm
+from src.warehouse.ingest import ensure_instrument
 
 _LOG = logging.getLogger(__name__)
 
@@ -71,6 +72,7 @@ async def router(state: dict) -> dict:
         SystemMessage(content=_SYSTEM),
         HumanMessage(content=f"Resolve this symbol or company: {raw_ticker!r}"),
     ]
+    resolved_ok = True
     try:
         resolution: TickerResolution = await llm.ainvoke(
             messages, config={"callbacks": [tracker]}
@@ -79,8 +81,20 @@ async def router(state: dict) -> dict:
         # The router is the entry node: an unhandled failure would abort the whole
         # graph. Degrade to a US-default resolution so the pipeline still runs.
         _LOG.warning("router: LLM resolution failed (%s); degrading to raw ticker", exc)
+        resolved_ok = False
         resolution = TickerResolution(
             resolved_ticker=raw_ticker or "UNKNOWN", screener="america", exchange="NASDAQ"
+        )
+
+    if resolved_ok:
+        # Write-through (WP-3): persist the resolved instrument so the warehouse
+        # knows every ticker ever analyzed. Deliberately a bare call (no local
+        # try/except): ensure_instrument never raises — it no-ops when the
+        # warehouse is disabled and logs+degrades on any DB error — so a DB
+        # problem cannot affect routing. The degraded path above is skipped:
+        # an unverified default resolution must not pollute the instruments table.
+        await ensure_instrument(
+            resolution.resolved_ticker, resolution.exchange, resolution.screener
         )
 
     per_node = tracker.totals()["per_node"]

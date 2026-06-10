@@ -1,6 +1,10 @@
 """Technicals analyst: tradingview-ta -> structured AnalystReport (quick tier).
 
 STRUCT_METHOD is imported from src.llm.factory per COORDINATION §7.5.
+
+WP-3: deliberately NO warehouse write-through here — TradingView returns an
+ephemeral TA summary (indicator recommendation), not warehouse data; price bars
+are persisted by the fundamentals analyst hook and the collector instead.
 """
 from __future__ import annotations
 
