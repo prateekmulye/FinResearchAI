@@ -31,6 +31,13 @@ export interface NodeRun {
   completedAt: number | null;
   /** Concatenated token text streamed for this node (reporter, etc.). */
   text: string;
+  /**
+   * The structured state delta this node emitted on `node_complete` (the raw
+   * LangGraph state fragment — analyst_reports, research_debate, trade_proposal,
+   * risk_debate, final_decision, run_metrics, …). The cockpit's intelligence
+   * panels decode this; empty until the node completes.
+   */
+  delta: Record<string, unknown>;
 }
 
 export interface AnalysisDone {
@@ -76,7 +83,7 @@ function ensureNode(state: AnalysisStreamState, node: string): AnalysisStreamSta
     order: [...state.order, node],
     nodes: {
       ...state.nodes,
-      [node]: { node, startedAt: Date.now(), completedAt: null, text: "" },
+      [node]: { node, startedAt: Date.now(), completedAt: null, text: "", delta: {} },
     },
   };
 }
@@ -115,7 +122,13 @@ function reducer(state: AnalysisStreamState, action: Action): AnalysisStreamStat
             ...withNode,
             nodes: {
               ...withNode.nodes,
-              [e.node]: { ...existing, completedAt: Date.now() },
+              [e.node]: {
+                ...existing,
+                completedAt: Date.now(),
+                // Merge so a node that completes in multiple updates (or that
+                // also streamed tokens) keeps every key it ever reported.
+                delta: { ...existing.delta, ...(e.delta ?? {}) },
+              },
             },
           };
         }

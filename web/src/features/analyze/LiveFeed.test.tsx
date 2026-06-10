@@ -26,7 +26,7 @@ function makeState(overrides: Partial<AnalysisStreamState> = {}): AnalysisStream
 }
 
 function makeNode(node: string, overrides: Partial<NodeRun> = {}): NodeRun {
-  return { node, startedAt: 1000, completedAt: null, text: "", ...overrides };
+  return { node, startedAt: 1000, completedAt: null, text: "", delta: {}, ...overrides };
 }
 
 describe("LiveFeed — live region scoping", () => {

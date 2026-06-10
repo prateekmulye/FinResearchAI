@@ -207,6 +207,119 @@
     font-family: var(--font-mono);
   }
 
+  /* --------------------------------------------------------------------- */
+  /* COCKPIT (WP-7) — pipeline canvas, panels, reveal                       */
+  /* --------------------------------------------------------------------- */
+
+  /* A pipeline node on the xyflow canvas. Pre-sized so the graph never
+     reflows mid-run (no CLS — NLM). Only transform/opacity animate. */
+  .pipe-node {
+    contain: layout style;
+    will-change: transform, opacity;
+    transition:
+      border-color var(--duration-base) var(--ease-spring),
+      box-shadow var(--duration-base) var(--ease-spring),
+      opacity var(--duration-base) var(--ease-spring);
+  }
+
+  /* The luminous-edge SVG paths between nodes keep a crisp 1px stroke at any
+     zoom and never repaint on layout. */
+  .pipe-edge {
+    vector-effect: non-scaling-stroke;
+  }
+
+  /* Auto-scrolling token stream: older lines fade out at the top via a mask,
+     so the eye stays on the freshest text without a hard cutoff. */
+  .token-stream {
+    -webkit-mask-image: linear-gradient(
+      to bottom,
+      transparent 0,
+      black 1.5rem,
+      black 100%
+    );
+    mask-image: linear-gradient(
+      to bottom,
+      transparent 0,
+      black 1.5rem,
+      black 100%
+    );
+  }
+
+  /* Editorial typography for the rendered markdown report (DESIGN.md §3). */
+  .report-prose {
+    color: var(--color-fg-muted);
+    font-size: var(--text-base);
+    line-height: 1.65;
+  }
+  .report-prose > :first-child {
+    margin-top: 0;
+  }
+  .report-prose h1,
+  .report-prose h2,
+  .report-prose h3 {
+    color: var(--color-fg);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    line-height: 1.25;
+    margin: 1.8em 0 0.6em;
+  }
+  .report-prose h1 {
+    font-size: var(--text-2xl);
+  }
+  .report-prose h2 {
+    font-size: var(--text-xl);
+  }
+  .report-prose h3 {
+    font-size: var(--text-lg);
+  }
+  .report-prose p {
+    margin: 0 0 1em;
+  }
+  .report-prose strong {
+    color: var(--color-fg);
+    font-weight: 600;
+  }
+  .report-prose a {
+    color: var(--color-accent);
+    text-underline-offset: 2px;
+  }
+  .report-prose ul,
+  .report-prose ol {
+    margin: 0 0 1em 1.25em;
+  }
+  .report-prose li {
+    margin: 0.3em 0;
+  }
+  .report-prose code {
+    font-family: var(--font-mono);
+    font-size: 0.875em;
+    background: var(--color-surface-2);
+    padding: 0.1em 0.35em;
+    border-radius: var(--radius-xs);
+  }
+  .report-prose hr {
+    border: 0;
+    border-top: 1px solid var(--color-line);
+    margin: 1.6em 0;
+  }
+  .report-prose table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    margin: 0 0 1em;
+  }
+  .report-prose th,
+  .report-prose td {
+    border: 1px solid var(--color-line);
+    padding: 0.4em 0.6em;
+    text-align: left;
+  }
+  .report-prose th {
+    color: var(--color-fg);
+    background: var(--color-surface-1);
+  }
+
   /* The texture glue: one fixed fractal-noise overlay over the whole app.
      ~3.5% opacity reads as CRT phosphor + paper, never as visible static. */
   .grain::after {
@@ -267,11 +380,77 @@
   }
 }
 
+/* Traveling signal: a luminous dot crawling an edge from source to target
+   while data flows (NLM — welds motion to causality). Driven via offset-path
+   on the edge geometry; here we animate the 0->1 offset-distance. */
+@keyframes fin-signal-travel {
+  from {
+    offset-distance: 0%;
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  90% {
+    opacity: 1;
+  }
+  to {
+    offset-distance: 100%;
+    opacity: 0;
+  }
+}
+
+/* Live edge "marching ants": continuous dash crawl indicating an open SSE
+   flow across that edge. */
+@keyframes fin-edge-flow {
+  to {
+    stroke-dashoffset: -24;
+  }
+}
+
+/* The verdict reveal: a restrained materialization (Peak-End). Scale up from
+   0.92 with a brief settle — no bounce kitsch. */
+@keyframes fin-verdict-in {
+  from {
+    opacity: 0;
+    transform: scale(0.92) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* Word-stream materialization: evidence lines rise into place (NLM). */
+@keyframes fin-rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .animate-breathe {
   animation: fin-breathe 2600ms var(--ease-in-out) infinite;
 }
 .animate-accent-flash {
   animation: fin-accent-flash var(--duration-fast) var(--ease-spring);
+}
+.animate-verdict-in {
+  animation: fin-verdict-in 360ms var(--ease-spring) both;
+}
+.animate-rise-in {
+  animation: fin-rise-in 320ms var(--ease-spring) both;
+}
+.animate-signal-travel {
+  animation: fin-signal-travel 900ms linear infinite;
+}
+.edge-flow {
+  stroke-dasharray: 4 6;
+  animation: fin-edge-flow 700ms linear infinite;
 }
 
 /* =========================================================================
@@ -287,7 +466,16 @@
     scroll-behavior: auto !important;
   }
   .animate-breathe,
-  .animate-accent-flash {
+  .animate-accent-flash,
+  .animate-signal-travel,
+  .edge-flow {
     animation: none !important;
+  }
+  /* Reveals must still END in their final state, just instantly — no motion. */
+  .animate-verdict-in,
+  .animate-rise-in {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
   }
 }

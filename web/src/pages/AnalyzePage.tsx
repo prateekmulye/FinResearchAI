@@ -2,19 +2,24 @@ import { AlertTriangle, Sparkles } from "lucide-react";
 
 import { GlassCard } from "@/components/ui/glass-card";
 import { PageHeader } from "@/components/ui/page-header";
-import { SignalBadge } from "@/components/ui/signal-badge";
 import { AnalyzeForm } from "@/features/analyze/AnalyzeForm";
-import { LiveFeed } from "@/features/analyze/LiveFeed";
+import { Cockpit } from "@/features/analyze/cockpit/Cockpit";
+import { QuotaBlocked } from "@/features/analyze/cockpit/QuotaBlocked";
+import { isQuotaError } from "@/features/analyze/cockpit/quota";
 import { useAnalysisStream } from "@/hooks/useAnalysisStream";
 
 /**
- * AnalyzePage — the home cockpit. WP-6 ships the command bar + a styled live
- * feed wired end-to-end to the SSE hook (the plumbing proof). WP-7 grows this
- * into the full graph cockpit (xyflow canvas, token stream, verdict card).
+ * AnalyzePage — the live cockpit (WP-7). The command bar kicks off a run; the
+ * Cockpit renders the 12-node agent graph, the streaming intelligence panels,
+ * the bull/bear debate theater, and the final verdict reveal — all as a pure
+ * function of the SSE stream state. A quota refusal steers to Library replays.
  */
 export function AnalyzePage() {
   const { state, isActive, start, stop } = useAnalysisStream();
-  const verdict = state.done?.finalDecision ?? null;
+
+  const quotaBlocked = state.phase === "error" && isQuotaError(state.error);
+  const hardError = state.phase === "error" && !quotaBlocked;
+  const hasRun = state.order.length > 0 || state.phase !== "idle";
 
   return (
     <div className="space-y-8">
@@ -44,29 +49,11 @@ export function AnalyzePage() {
         />
       </GlassCard>
 
-      {/* Verdict — the peak. Renders as soon as `done` lands. */}
-      {verdict && (
-        <GlassCard className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-4">
-            <SignalBadge action={verdict.action} score={verdict.score} size="lg" />
-            <div>
-              <p className="font-mono text-2xs uppercase tracking-[0.18em] text-[var(--color-fg-subtle)]">
-                {state.ticker} · conviction
-              </p>
-              <p className="font-mono text-2xl font-semibold tabular-nums text-[var(--color-fg)]">
-                {(verdict.conviction * 100).toFixed(0)}
-                <span className="text-base text-[var(--color-fg-subtle)]">%</span>
-              </p>
-            </div>
-          </div>
-          <p className="max-w-md text-sm leading-relaxed text-[var(--color-fg-muted)]">
-            {verdict.rationale}
-          </p>
-        </GlassCard>
-      )}
+      {/* Quota refusal — a designed steer to replays, never a dead wall. */}
+      {quotaBlocked && <QuotaBlocked />}
 
-      {/* Error band — clean, never a raw 500. */}
-      {state.phase === "error" && state.error && (
+      {/* A real failure (not quota) — clean, never a raw 500. */}
+      {hardError && state.error && (
         <div
           role="alert"
           className="flex items-start gap-3 rounded-2xl border px-5 py-4"
@@ -90,22 +77,18 @@ export function AnalyzePage() {
         </div>
       )}
 
-      {/* Live feed (or a resting hint) */}
-      {state.order.length > 0 ? (
-        <section aria-label="Pipeline" className="space-y-3">
-          <h2 className="font-mono text-2xs uppercase tracking-[0.18em] text-[var(--color-fg-subtle)]">
-            Pipeline · {state.order.length} nodes
-          </h2>
-          <LiveFeed state={state} />
-        </section>
+      {/* The cockpit. Renders the moment a run begins; persists after done. */}
+      {hasRun && !quotaBlocked ? (
+        <Cockpit state={state} />
       ) : (
-        state.phase === "idle" && (
+        state.phase === "idle" &&
+        !quotaBlocked && (
           <div className="flex items-center gap-2 px-1 text-sm text-[var(--color-fg-subtle)]">
             <Sparkles
               className="size-4 text-[var(--color-accent)]"
               aria-hidden="true"
             />
-            The graph streams here the moment you run an analysis.
+            The agent graph streams here the moment you run an analysis.
           </div>
         )
       )}
