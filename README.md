@@ -63,7 +63,8 @@ The dependency-free client `web/index.html` renders the stream live.
 ## Deploy
 
 Ships as a docker-compose stack (Caddy auto-HTTPS + app + Postgres/pgvector) on any
-VPS — deployment guide lands in `docs/deploy.md` as part of the v2 elevation.
+VPS: `docker compose -f docker-compose.prod.yml up -d --build`. Full runbook (DNS,
+`.env`, first-run checks, updates, backups): [`docs/deploy.md`](./docs/deploy.md).
 
 ## License
 
