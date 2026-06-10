@@ -25,7 +25,7 @@ def _parse_sse(raw: str):
     return events
 
 
-def test_healthz():
+def test_healthz_stays_at_root():
     with TestClient(create_app()) as client:
         resp = client.get("/healthz")
         assert resp.status_code == 200
@@ -34,7 +34,7 @@ def test_healthz():
 
 def test_analyze_streams_events_ending_in_done(offline_graph):
     with TestClient(create_app()) as client:
-        resp = client.post("/analyze", json={"ticker": "AAPL", "investor_mode": "Neutral"})
+        resp = client.post("/api/analyze", json={"ticker": "AAPL", "investor_mode": "Neutral"})
         assert resp.status_code == 200
         assert resp.headers["content-type"].startswith("text/event-stream")
         events = _parse_sse(resp.text)
@@ -48,7 +48,7 @@ def test_analyze_streams_events_ending_in_done(offline_graph):
 
 def test_analyze_rejects_bad_ticker_with_422():
     with TestClient(create_app()) as client:
-        resp = client.post("/analyze", json={"ticker": "; DROP TABLE--"})
+        resp = client.post("/api/analyze", json={"ticker": "; DROP TABLE--"})
         assert resp.status_code == 422
 
 
@@ -56,14 +56,15 @@ def test_rate_limit_returns_429_after_cap(offline_graph):
     # cap of 2 requests for the test app
     with TestClient(create_app(rate_limit=2, rate_window_s=3600)) as client:
         body = {"ticker": "AAPL"}
-        assert client.post("/analyze", json=body).status_code == 200
-        assert client.post("/analyze", json=body).status_code == 200
-        resp = client.post("/analyze", json=body)
+        assert client.post("/api/analyze", json=body).status_code == 200
+        assert client.post("/api/analyze", json=body).status_code == 200
+        resp = client.post("/api/analyze", json=body)
         assert resp.status_code == 429
 
 
-def test_runs_endpoint_reads_jsonl_trace(tmp_path, monkeypatch):
-    # Write a fake trace where RunRecorder would, then read it back.
+def test_runs_endpoint_reads_jsonl_trace_when_warehouse_disabled(tmp_path, monkeypatch):
+    # Warehouse disabled (env_isolation scrubs DATABASE_URL): /api/runs/{id}
+    # falls back to the JSONL trace RunRecorder wrote — the pre-WP-5 behavior.
     from src.obs.recorder import RunRecorder
 
     rec = RunRecorder(runs_dir=str(tmp_path))
@@ -71,19 +72,48 @@ def test_runs_endpoint_reads_jsonl_trace(tmp_path, monkeypatch):
     rec.flush()
     monkeypatch.setenv("RUNS_DIR", str(tmp_path))
     with TestClient(create_app(runs_dir=str(tmp_path))) as client:
-        resp = client.get(f"/runs/{rec.run_id}")
+        resp = client.get(f"/api/runs/{rec.run_id}")
         assert resp.status_code == 200
         body = resp.json()
         assert body["run_id"] == rec.run_id
+        assert body["source"] == "jsonl"
         assert body["events"][0]["node"] == "router"
 
 
 def test_runs_endpoint_404_for_unknown_id(tmp_path):
     with TestClient(create_app(runs_dir=str(tmp_path))) as client:
-        assert client.get("/runs/does-not-exist").status_code == 404
+        assert client.get("/api/runs/does-not-exist").status_code == 404
+
+
+def test_runs_endpoint_400_for_non_token_run_id(tmp_path):
+    # run_ids are hex tokens; anything else (e.g. dotted traversal attempts)
+    # is rejected before touching the filesystem or the DB.
+    with TestClient(create_app(runs_dir=str(tmp_path))) as client:
+        assert client.get("/api/runs/..etc").status_code == 400
 
 
 def test_cors_headers_present():
     with TestClient(create_app()) as client:
         resp = client.get("/healthz", headers={"Origin": "http://example.com"})
         assert resp.headers.get("access-control-allow-origin") == "*"
+
+
+# ---------------------------------------------------------------------------
+# WP-5 breaking rename: the root routes are GONE — everything lives under /api.
+# ---------------------------------------------------------------------------
+
+
+def test_old_root_analyze_route_removed():
+    with TestClient(create_app()) as client:
+        resp = client.post("/analyze", json={"ticker": "AAPL"})
+        assert resp.status_code in {404, 405}
+
+
+def test_old_root_runs_route_removed(tmp_path):
+    from src.obs.recorder import RunRecorder
+
+    rec = RunRecorder(runs_dir=str(tmp_path))
+    rec.record("router", "metric", {})
+    rec.flush()
+    with TestClient(create_app(runs_dir=str(tmp_path))) as client:
+        assert client.get(f"/runs/{rec.run_id}").status_code == 404

@@ -92,7 +92,7 @@
 
       let resp;
       try {
-        resp = await fetch(API + "/analyze", {
+        resp = await fetch(API + "/api/analyze", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });

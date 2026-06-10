@@ -353,6 +353,68 @@ async def sqlite_warehouse(monkeypatch, tmp_path):
     settings_mod.get_settings.cache_clear()
 
 
+# ---------------------------------------------------------------------------
+# WP-5 shared fixture — added ADDITIVELY (existing fixtures above untouched).
+#
+# api_sqlite_warehouse: warehouse enabled on a SQLite file, safe to use with
+# TestClient. Unlike the async ``sqlite_warehouse`` fixture (which memoizes an
+# engine on the pytest loop), this one leaves NO memoized engine behind: schema
+# creation and seeding run on throwaway engines via asyncio.run, and the app
+# lifespan creates (and at shutdown disposes) its own engine on TestClient's
+# portal loop — respecting the AsyncEngine's event-loop affinity. The lifespan
+# watchlist seeding is patched to a no-op so tests fully control the
+# instruments table.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def api_sqlite_warehouse(monkeypatch, tmp_path):
+    """Yield a ``seed(coro_fn)`` helper: runs ``await coro_fn(session)`` in a
+    committed throwaway session against the test warehouse and returns its result."""
+    import asyncio
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    import src.api.lifespan as lifespan_mod
+    from src.warehouse.bootstrap import create_all
+    from src.warehouse.db import enable_sqlite_fks, reset_engine
+
+    url = f"sqlite+aiosqlite:///{tmp_path}/api-warehouse.db"
+
+    async def _prepare() -> None:
+        await reset_engine()  # drop any memo from a previous test/loop
+        engine = create_async_engine(url)
+        enable_sqlite_fks(engine)
+        await create_all(engine)
+        await engine.dispose()
+
+    asyncio.run(_prepare())
+    monkeypatch.setenv("DATABASE_URL", url)
+    settings_mod.get_settings.cache_clear()
+
+    async def _no_seed() -> int:
+        return 0
+
+    monkeypatch.setattr(lifespan_mod, "seed_watchlist", _no_seed)
+
+    def seed(coro_fn):
+        async def _go():
+            engine = create_async_engine(url)
+            enable_sqlite_fks(engine)
+            maker = async_sessionmaker(engine, expire_on_commit=False)
+            async with maker() as session:
+                result = await coro_fn(session)
+                await session.commit()
+            await engine.dispose()
+            return result
+
+        return asyncio.run(_go())
+
+    yield seed
+    asyncio.run(reset_engine())
+    settings_mod.get_settings.cache_clear()
+
+
 class _WPIFakeStructured:
     """Stand-in for llm.with_structured_output(Schema): its ainvoke returns a fixed instance."""
 

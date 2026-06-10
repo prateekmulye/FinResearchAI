@@ -1,45 +1,35 @@
-"""FastAPI app for FinResearchAI: streaming analysis, health, and run-trace lookup.
+"""FastAPI app for FinResearchAI — API v2 (WP-5): everything under /api.
 
 Endpoints:
-  POST /analyze        -> EventSourceResponse streaming the graph run as SSE.
-  GET  /healthz        -> liveness probe.
-  GET  /runs/{run_id}  -> the JSONL trace written by RunRecorder, as JSON.
+  POST /api/analyze              -> EventSourceResponse streaming the graph run as SSE.
+  GET  /api/library              -> finished/running runs, newest first (Research Library).
+  GET  /api/runs/{run_id}        -> full run detail + replay events (warehouse, JSONL fallback).
+  GET  /api/market/...           -> instruments / prices / fundamentals / news reads.
+  GET  /api/eval/results         -> persisted debate A/B eval results.
+  GET  /healthz                  -> liveness probe (stays at root).
 
-Cross-cutting: CORS (open by default; tighten via ALLOWED_ORIGINS), a rate limiter
-(in-memory default, optional Redis seam), and input validation via AnalyzeRequest.
+The pre-v2 root routes (POST /analyze, GET /runs/{id}) are REMOVED — we own the
+only client (web/index.html), which now calls /api/analyze.
+
+Cross-cutting: CORS (open by default; tighten via ALLOWED_ORIGINS), a per-minute
+rate limiter (in-memory default, optional Redis seam) on the analyze route, and
+input validation via AnalyzeRequest. The limiter and runs dir are app-scoped on
+``app.state`` so the routers share them without module globals.
 """
 from __future__ import annotations
 
-import json
 import os
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from sse_starlette import EventSourceResponse
 
 from src.api.lifespan import lifespan
 from src.api.ratelimit import get_rate_limiter
-from src.api.schemas import AnalyzeRequest
-from src.api.stream import analyze_event_stream
-
-
-def _trust_proxy() -> bool:
-    return os.getenv("TRUST_PROXY", "").lower() in {"1", "true", "yes"}
-
-
-def _client_key(request: Request) -> str:
-    # X-Forwarded-For is client-spoofable, so only honor it when TRUST_PROXY is set
-    # (i.e. we are knowingly behind a trusted proxy such as the HF Spaces edge). When
-    # trusted, take the LAST hop the proxy appended, not the client-controlled first.
-    # Otherwise key on the real socket peer so the limiter can't be trivially bypassed.
-    if _trust_proxy():
-        fwd = request.headers.get("x-forwarded-for")
-        if fwd:
-            hops = [h.strip() for h in fwd.split(",") if h.strip()]
-            if hops:
-                return hops[-1]
-    return request.client.host if request.client else "unknown"
+from src.api.routes import analyze as analyze_routes
+from src.api.routes import eval as eval_routes
+from src.api.routes import library as library_routes
+from src.api.routes import market as market_routes
 
 
 def create_app(
@@ -64,39 +54,17 @@ def create_app(
         allow_headers=["*"],
     )
 
-    limiter = get_rate_limiter(limit=rate_limit, window_s=rate_window_s)
-    runs_path = Path(runs_dir or os.getenv("RUNS_DIR", "runs"))
+    app.state.limiter = get_rate_limiter(limit=rate_limit, window_s=rate_window_s)
+    app.state.runs_path = Path(runs_dir or os.getenv("RUNS_DIR", "runs"))
 
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:
         return {"status": "ok"}
 
-    @app.post("/analyze")
-    async def analyze(req: AnalyzeRequest, request: Request):
-        if not limiter.allow(_client_key(request)):
-            raise HTTPException(status_code=429, detail="rate limit exceeded")
-        generator = analyze_event_stream(
-            ticker=req.ticker,
-            investor_mode=req.investor_mode,
-            debate_mode=req.debate_mode,
-            runs_dir=str(runs_path),
-        )
-        return EventSourceResponse(generator, ping=15)
-
-    @app.get("/runs/{run_id}")
-    async def get_run(run_id: str) -> dict:
-        # Guard against path traversal: run_ids are hex tokens.
-        if not run_id.replace("-", "").isalnum():
-            raise HTTPException(status_code=400, detail="invalid run_id")
-        trace = runs_path / f"{run_id}.jsonl"
-        if not trace.exists():
-            raise HTTPException(status_code=404, detail="run not found")
-        events = [
-            json.loads(line)
-            for line in trace.read_text(encoding="utf-8").splitlines()
-            if line.strip()
-        ]
-        return {"run_id": run_id, "events": events}
+    app.include_router(analyze_routes.router, prefix="/api")
+    app.include_router(library_routes.router, prefix="/api")
+    app.include_router(market_routes.router, prefix="/api/market")
+    app.include_router(eval_routes.router, prefix="/api/eval")
 
     return app
 

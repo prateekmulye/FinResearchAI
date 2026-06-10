@@ -13,14 +13,17 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-# Tickers: 1-12 chars of A-Z/0-9, optional .SUFFIX for international (e.g. RELIANCE.NS, BRK.B).
-TICKER_RE = re.compile(r"[A-Z0-9]{1,12}(?:\.[A-Z]{1,4})?")
+# Strict ticker allowlist (WP-5 hardening): leading alphanumeric, then up to 14
+# more of A-Z/0-9/dot/hyphen (covers AAPL, BRK.B, BRK-B, RELIANCE.NS, 0700.HK).
+# Applied AFTER strip().upper() normalization, on the analyze body and on every
+# /api/market/{ticker} path param — junk never reaches the DB or an LLM.
+TICKER_RE = re.compile(r"^[A-Z0-9][A-Z0-9.\-]{0,14}$")
 
 InvestorMode = Literal["Bullish", "Bearish", "Neutral"]
 
 
 class AnalyzeRequest(BaseModel):
-    ticker: str = Field(..., min_length=1, max_length=24)
+    ticker: str = Field(..., min_length=1, max_length=15)
     investor_mode: InvestorMode = "Neutral"
     debate_mode: Literal["on", "off"] | None = None  # None => use settings default
 
