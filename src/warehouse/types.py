@@ -22,7 +22,7 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import DateTime, Text
+from sqlalchemy import DateTime, Float, Text
 from sqlalchemy.engine import Dialect
 from sqlalchemy.types import TypeDecorator
 
@@ -32,6 +32,26 @@ class EmbeddingVector(TypeDecorator):
 
     impl = Text
     cache_ok = True
+
+    class Comparator(TypeDecorator.Comparator):
+        """pgvector-style distance comparator (WP-9 semantic search).
+
+        ``cosine_distance`` emits the pgvector ``<=>`` operator — the same SQL
+        pgvector.sqlalchemy's own comparator produces — so ``ORDER BY embedding
+        <=> :q`` can use the HNSW cosine indexes. Only meaningful on PostgreSQL;
+        non-PG callers must go through ``repos.semantic_search``'s dialect guard.
+        """
+
+        def cosine_distance(self, other: Any) -> Any:
+            return self.op("<=>", return_type=Float)(other)
+
+    comparator_factory = Comparator
+
+    def coerce_compared_value(self, op: Any, value: Any) -> Any:
+        # Keep THIS type for comparison operands. The TypeDecorator default
+        # delegates to the impl (Text), which would bind a query vector as a
+        # string; returning self keeps the dim check + pgvector bind processing.
+        return self
 
     def __init__(self, dim: int) -> None:
         super().__init__()
