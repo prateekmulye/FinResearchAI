@@ -21,11 +21,12 @@ def test_load_model_tiers_reads_yaml(tmp_path):
 # COORDINATION §1 frozen Settings fields. A rename/removal here is a coordination
 # event that breaks downstream WPs, so assert the full set explicitly.
 # WP-1 (flagship elevation, spec-sanctioned ADDITIVE change): database_url + db_echo.
+# WP-2 (spec-sanctioned REMOVAL): chroma_dir is gone with the Chroma backend.
 _CONTRACT_FIELDS = {
     "llm_provider", "llm_base_url", "ollama_api_key", "firecrawl_api_key",
     "quick_model", "deep_model", "quick_temperature", "deep_temperature",
     "research_debate_rounds", "risk_debate_rounds", "debate_mode",
-    "chroma_dir", "embedding_model", "runs_dir", "langsmith_enabled",
+    "embedding_model", "runs_dir", "langsmith_enabled",
     "database_url", "db_echo",
 }
 
@@ -39,8 +40,9 @@ def test_settings_exposes_all_contract_fields(monkeypatch):
     # Spot-check contract defaults that downstream WPs rely on.
     assert s.llm_provider == "ollama_cloud"
     assert s.debate_mode == "on"
-    assert s.chroma_dir == ".chroma"
     assert s.embedding_model == "BAAI/bge-small-en-v1.5"
+    # WP-2: the Chroma backend (and its chroma_dir setting) is gone.
+    assert "chroma_dir" not in type(s).model_fields
     assert s.runs_dir == "runs"
     assert s.langsmith_enabled is False
     # WP-1 warehouse fields: disabled by default (no DATABASE_URL -> warehouse off).

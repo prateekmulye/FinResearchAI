@@ -25,8 +25,8 @@ router → [news · fundamentals · technicals analysts] (parallel)
   with quick/deep model tiers (M7 routing). No GPU, no OpenAI key.
 - **State:** a typed `AgentState` (`src/state.py`) is the primary channel; structured
   Pydantic reports are passed between nodes (no JSON string-scraping).
-- **Memory:** embedded **Chroma** + local `fastembed` (BGE-small, 384-dim) as a
-  deterministic cross-run *verdict cache* — metadata recency query, not similarity.
+- **Memory:** a **Postgres warehouse**-backed deterministic cross-run *verdict cache*
+  (newest-by-`ts` query, not similarity) + local `fastembed` (BGE-small, 384-dim).
 - **Web research:** **Firecrawl** search/scrape (replaces the old Tavily/Pinecone path).
 - **Observability:** a `CostTracker` callback records per-node tokens/latency/cost;
   `RunRecorder` writes a JSONL trace per run, replayable at `GET /runs/{run_id}`.

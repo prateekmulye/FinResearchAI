@@ -37,7 +37,7 @@ class FastEmbedEmbedder:
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         # .embed() returns a generator of numpy float32 arrays; convert to
-        # plain python float lists for Chroma compatibility + JSON safety.
+        # plain python float lists for pgvector/JSON-column compatibility.
         return [vec.tolist() for vec in self._model.embed(texts)]
 
     def embed_one(self, text: str) -> list[float]:
