@@ -43,16 +43,26 @@ export function DossierPage() {
   const days = daysForRange(range);
 
   // Resolve the instrument metadata (name/sector/country/watched) by searching
-  // coverage for the exact ticker. Best-effort: the dossier renders without it.
+  // coverage for the exact ticker. EXACT match only — a near-miss (AAPL for
+  // /market/APP) must never masquerade as this instrument; an unresolved ticker
+  // is what lets the unknown-ticker dead-end below fire. When ?exchange= is
+  // present, prefer the exchange-qualified listing among exact-ticker matches.
+  // Best-effort: the dossier renders without it.
   const instrumentQuery = useQuery({
     queryKey: ["instrument", symbol],
     queryFn: ({ signal }) => api.instruments({ q: symbol, limit: 10 }, signal),
   });
-  const instrument =
-    instrumentQuery.data?.instruments.find(
+  const tickerMatches =
+    instrumentQuery.data?.instruments.filter(
       (i) => i.ticker.toUpperCase() === symbol,
-    ) ??
-    instrumentQuery.data?.instruments[0] ??
+    ) ?? [];
+  const instrument =
+    (exchange
+      ? tickerMatches.find(
+          (i) => i.exchange.toUpperCase() === exchange.toUpperCase(),
+        )
+      : undefined) ??
+    tickerMatches[0] ??
     null;
 
   const pricesQuery = useQuery({

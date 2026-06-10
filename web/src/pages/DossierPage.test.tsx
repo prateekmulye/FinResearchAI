@@ -210,4 +210,42 @@ describe("DossierPage", () => {
       await screen.findByText(/no fundamentals snapshot yet/i),
     ).toBeInTheDocument();
   });
+
+  it("renders the unknown-ticker dead-end even when search returns a near-miss", async () => {
+    // /market/APP: every market endpoint 404s, and the coverage search only
+    // PREFIX-matches AAPL. The near-miss must NOT masquerade as APP's metadata
+    // — the dead-end fires instead of Apple's dossier.
+    instruments.mockResolvedValue({ instruments: [APPLE] });
+    prices.mockRejectedValue(new ApiError("nope", 404));
+    fundamentals.mockRejectedValue(new ApiError("nope", 404));
+    news.mockRejectedValue(new ApiError("nope", 404));
+    renderWithProviders(<DossierPage />, {
+      route: "/market/APP",
+      path: "/market/:ticker",
+    });
+    expect(await screen.findByText("APP isn’t in coverage")).toBeInTheDocument();
+    expect(screen.queryByText("Apple Inc.")).not.toBeInTheDocument();
+    // Header + empty-state both offer the live-analysis escape hatch.
+    expect(
+      screen.getAllByRole("link", { name: /analyze APP live/i }).length,
+    ).toBeGreaterThanOrEqual(1);
+  });
+
+  it("prefers the exchange-qualified match when ?exchange= is present", async () => {
+    const appleIndia = {
+      ...APPLE,
+      id: 2,
+      exchange: "NSE",
+      screener: "india",
+      name: "Apple India Listing",
+    };
+    // The wrong-exchange row comes FIRST: only exchange qualification picks NASDAQ.
+    instruments.mockResolvedValue({ instruments: [appleIndia, APPLE] });
+    renderWithProviders(<DossierPage />, {
+      route: "/market/AAPL?exchange=NASDAQ",
+      path: "/market/:ticker",
+    });
+    expect(await screen.findByText("Apple Inc.")).toBeInTheDocument();
+    expect(screen.queryByText("Apple India Listing")).not.toBeInTheDocument();
+  });
 });

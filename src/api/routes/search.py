@@ -7,13 +7,16 @@ Semantic-first with an honest fallback chain:
 3. PostgreSQL dialect AND embedder usable  -> pgvector cosine ``semantic_search``
 4. otherwise                               -> dialect-agnostic ``keyword_search``
 
-``mode`` in the response reports which path actually answered. The query
-embedding goes through the same warehouse seam + ``asyncio.to_thread`` as the
-write path (fastembed is sync CPU work; never block the event loop).
+Any failure INSIDE the semantic path (transient DB error, dialect surprise)
+logs a warning and degrades to keyword — never a 500. ``mode`` in the response
+reports which path actually answered. The query embedding goes through the
+same warehouse seam + ``asyncio.to_thread`` as the write path (fastembed is
+sync CPU work; never block the event loop).
 """
 from __future__ import annotations
 
 import asyncio
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -21,12 +24,9 @@ from src.api.routes.deps import clamp_limit, require_warehouse
 from src.api.routes.dto import SearchHitOut, SearchResponse
 from src.warehouse.db import get_engine, session_scope
 from src.warehouse.embeddings import embed_or_none
-from src.warehouse.repos import (
-    SearchHit,
-    UnsupportedDialectError,
-    keyword_search,
-    semantic_search,
-)
+from src.warehouse.repos import SearchHit, keyword_search, semantic_search
+
+_LOG = logging.getLogger(__name__)
 
 router = APIRouter(dependencies=[Depends(require_warehouse)])
 
@@ -65,7 +65,13 @@ async def search(q: str = "", limit: int = 20) -> SearchResponse:
                 async with session_scope() as session:
                     hits = await semantic_search(session, vectors[0], limit=limit)
                 mode = "semantic"
-            except UnsupportedDialectError:  # belt-and-braces behind _semantic_eligible
+            except Exception:
+                # ANY semantic failure — transient DB error, driver hiccup, or
+                # UnsupportedDialectError sneaking past _semantic_eligible —
+                # degrades to the keyword path with mode honest, never a 500.
+                _LOG.warning(
+                    "semantic search failed; falling back to keyword", exc_info=True
+                )
                 hits = None
     if hits is None:
         async with session_scope() as session:

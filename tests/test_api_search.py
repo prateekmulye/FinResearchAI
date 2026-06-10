@@ -165,3 +165,23 @@ def test_search_falls_back_on_unsupported_dialect(
         body = client.get("/api/search", params={"q": "margin"}).json()
     assert body["mode"] == "keyword"
     assert "run-aapl" in [h["ref"] for h in body["hits"]]
+
+
+def test_search_falls_back_to_keyword_on_semantic_failure(
+    api_sqlite_warehouse, warehouse_fake_embedder, monkeypatch
+):
+    # A transient failure INSIDE the semantic path (DB hiccup, driver error)
+    # must degrade to keyword with mode honest — never a 500.
+    _seed_search(api_sqlite_warehouse)
+
+    async def _boom(session, query_vec, *, limit=20):
+        raise RuntimeError("transient db error")
+
+    monkeypatch.setattr(search_routes, "_semantic_eligible", lambda: True)
+    monkeypatch.setattr(search_routes, "semantic_search", _boom)
+    with TestClient(create_app()) as client:
+        resp = client.get("/api/search", params={"q": "margin"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["mode"] == "keyword"
+    assert "run-aapl" in [h["ref"] for h in body["hits"]]

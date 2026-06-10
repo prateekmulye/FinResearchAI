@@ -9,9 +9,11 @@
  * latest bar at rest). Colors come from the DESIGN bull/bear tokens, resolved
  * to hex at mount because the charting canvas can't read CSS custom properties.
  *
- * A ResizeObserver keeps it fluid; reduced-motion users get an instant fit.
- * The canvas itself is aria-hidden — the legend + the surrounding panel carry
- * the accessible price story.
+ * A ResizeObserver keeps it fluid. The chart carries no JS-driven motion —
+ * fitContent() is instant and scroll/scale interactions are disabled — so
+ * there is no reduced-motion branch to take here (the global CSS handles the
+ * rest of the page). The canvas itself is aria-hidden — the legend + the
+ * surrounding panel carry the accessible price story.
  */
 import {
   type CandlestickData,
@@ -26,18 +28,42 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { PriceBar } from "@/lib/api";
-import { useReducedMotion } from "@/hooks/useReducedMotion";
 import { formatCompactUsd } from "@/lib/utils";
+
+/**
+ * Normalize any CSS color via a canvas 2D `fillStyle` round-trip: the browser
+ * parses it (including OKLCH/lab on modern engines) and serializes it back as
+ * `#rrggbb` (opaque) or `rgba(...)` — both canvas-safe. Returns null when 2D
+ * contexts are unavailable (jsdom/SSR) or the value didn't parse (an invalid
+ * assignment leaves `fillStyle` at its previous value — the sentinel).
+ */
+function canvasColor(raw: string): string | null {
+  try {
+    const ctx = document.createElement("canvas").getContext("2d");
+    if (!ctx) return null;
+    const sentinel = "#010203";
+    ctx.fillStyle = sentinel;
+    ctx.fillStyle = raw;
+    const out = String(ctx.fillStyle);
+    if (out === sentinel && raw.toLowerCase() !== sentinel) return null;
+    return out.startsWith("#") || out.startsWith("rgb") ? out : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Resolve a DESIGN CSS token to a canvas-parseable color.
  *
  * The DESIGN tokens are authored in OKLCH, which lightweight-charts v4's color
  * parser CANNOT read (it throws "Cannot parse color: oklch(...)", and the
- * attribution-logo widget grayscales the text color even when hidden). So we
- * let the BROWSER resolve the token to an rgb(...) string via a probe element's
- * computed `color`, then hand the chart that. Falls back to a hex when there's
- * no DOM (tests / SSR) or the resolution doesn't yield an rgb value.
+ * attribution-logo widget grayscales the text color even when hidden). Note
+ * that a probe element's computed `color` may ALSO serialize as oklch() on
+ * modern browsers, so the resolution chain is:
+ *   1. canvas 2D fillStyle round-trip (browser parse -> #hex/rgba serialization);
+ *   2. pass-through when the token is already canvas-safe (hex / rgb / named);
+ *   3. probe element computed color, accepted only when it yields rgb(...);
+ *   4. the hex fallback (no DOM — tests/SSR — or nothing above resolved).
  */
 function cssVar(name: string, fallback: string): string {
   if (typeof window === "undefined" || typeof document === "undefined") {
@@ -47,6 +73,10 @@ function cssVar(name: string, fallback: string): string {
     .getPropertyValue(name)
     .trim();
   if (!raw) return fallback;
+  // Canvas round-trip: normalizes ANY parseable color (oklch included) to
+  // #hex/rgba — exactly what the chart's parser accepts.
+  const normalized = canvasColor(raw);
+  if (normalized) return normalized;
   // Already canvas-safe (hex / rgb / named) — pass through.
   if (!raw.startsWith("oklch") && !raw.startsWith("lab") && !raw.startsWith("lch")) {
     return raw;
@@ -61,8 +91,17 @@ function cssVar(name: string, fallback: string): string {
   return resolved && resolved.startsWith("rgb") ? resolved : fallback;
 }
 
-/** Append an alpha to an rgb()/rgba() string for the volume tint (0..1). */
+/** Append an alpha to a #rrggbb / rgb() / rgba() color for the volume tint
+ *  (0..1). Handles hex because the canvas round-trip serializes opaque colors
+ *  as #rrggbb. */
 function withAlpha(color: string, alpha: number): string {
+  const hex = /^#([0-9a-f]{6})$/i.exec(color)?.[1];
+  if (hex) {
+    const r = parseInt(hex.slice(0, 2), 16);
+    const g = parseInt(hex.slice(2, 4), 16);
+    const b = parseInt(hex.slice(4, 6), 16);
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  }
   const m = color.match(/rgba?\(([^)]+)\)/);
   if (m?.[1]) {
     const [r, g, b] = m[1].split(",").map((p) => p.trim());
@@ -89,7 +128,6 @@ export function CandlestickChart({ bars }: { bars: PriceBar[] }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
-  const reducedMotion = useReducedMotion();
 
   // The OHLC the legend shows: the crosshair bar while hovering, else the last.
   const lastBar = bars.length ? bars[bars.length - 1] : null;
@@ -108,6 +146,9 @@ export function CandlestickChart({ bars }: { bars: PriceBar[] }) {
 
   const tokens = useMemo(
     () => ({
+      // Hex fallbacks mirror the styles/index.css :root tokens (--color-bull
+      // oklch(72% 0.15 152) / --color-bear oklch(64% 0.19 22) / --color-fg-muted
+      // oklch(74% 0.012 260)) — keep them in sync if the DESIGN palette moves.
       bull: cssVar("--color-bull", "#3fbf7f"),
       bear: cssVar("--color-bear", "#e0524a"),
       fg: cssVar("--color-fg-muted", "#b7bcc6"),
@@ -252,7 +293,7 @@ export function CandlestickChart({ bars }: { bars: PriceBar[] }) {
           }
         : null,
     );
-  }, [bars, tokens, reducedMotion]);
+  }, [bars, tokens]);
 
   const up = legend ? legend.close >= legend.open : true;
 

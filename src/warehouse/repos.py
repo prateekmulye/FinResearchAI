@@ -512,16 +512,19 @@ async def semantic_search(
         .order_by(run_dist)
         .limit(limit)
     )
-    hits = [
-        _news_hit(item, ticker, float(distance))
+    # Both queries SELECT the distance and skip NULL embeddings, so every hit
+    # here carries a float score (SearchHit.score is Optional only for the
+    # keyword path) — sort (distance, hit) pairs, nearest first.
+    scored = [
+        (float(distance), _news_hit(item, ticker, float(distance)))
         for item, ticker, distance in (await session.execute(news_stmt)).all()
     ]
-    hits += [
-        _run_hit(run, float(distance))
+    scored += [
+        (float(distance), _run_hit(run, float(distance)))
         for run, distance in (await session.execute(run_stmt)).all()
     ]
-    hits.sort(key=lambda h: h.score if h.score is not None else 0.0)
-    return hits[:limit]
+    scored.sort(key=lambda pair: pair[0])
+    return [hit for _, hit in scored[:limit]]
 
 
 async def keyword_search(

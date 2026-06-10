@@ -25,6 +25,7 @@ from src.warehouse.repos import (
     upsert_instrument,
     upsert_news,
 )
+from src.warehouse.types import EmbeddingVector
 
 TS = datetime(2026, 6, 10, 12, 0, 0, tzinfo=UTC)
 
@@ -142,9 +143,22 @@ def test_cosine_distance_comparator_compiles_to_pg_operator():
     """EmbeddingVector's comparator must emit the pgvector ``<=>`` operator and
     bind the query vector with the column's own type (not the Text impl)."""
     expr = NewsItem.embedding.cosine_distance([0.0] * EMBEDDING_DIM)
-    sql = str(expr.compile(dialect=postgresql.dialect()))
-    assert "<=>" in sql
-    assert "news_items.embedding" in sql
+    compiled = expr.compile(dialect=postgresql.dialect())
+    assert "<=>" in str(compiled)
+    assert "news_items.embedding" in str(compiled)
+    # The query-vector bind must carry EmbeddingVector (-> pgvector Vector on
+    # PG), not the Text impl — coerce_compared_value keeps the column's type.
+    assert compiled.binds
+    assert all(isinstance(b.type, EmbeddingVector) for b in compiled.binds.values())
+    # literal_binds renders the bind THROUGH that type's literal processor:
+    # pgvector serializes '[0.0,0.0,...]' (comma-joined, no spaces). A Text bind
+    # would refuse to render a list (or json.dumps it with ', ' separators).
+    literal_sql = str(
+        expr.compile(
+            dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
+        )
+    )
+    assert "news_items.embedding <=> '[0.0,0.0" in literal_sql
     run_sql = str(
         Run.embedding.cosine_distance([0.0] * EMBEDDING_DIM).compile(
             dialect=postgresql.dialect()

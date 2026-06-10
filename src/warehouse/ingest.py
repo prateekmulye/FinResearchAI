@@ -189,6 +189,9 @@ async def record_news(
         # Embed OUTSIDE the DB session (model inference is slow — same rule as
         # refresh_prices' fetch-outside-session) and off the event loop
         # (fastembed is sync CPU work). None -> rows land without embeddings.
+        # NOTE: already-deduped URLs still get embedded here (wasted inference)
+        # — negligible at ≤8 items/run; a url_hash pre-check is the optimization
+        # if item counts ever grow.
         texts = [
             f"{row['title']}\n{row['snippet']}" if row["snippet"] else row["title"]
             for row in rows
