@@ -34,6 +34,7 @@ import {
 export function Cockpit({
   state,
   modeHint = null,
+  replayElapsedMs = null,
 }: {
   state: AnalysisStreamState;
   /**
@@ -42,6 +43,12 @@ export function Cockpit({
    * is inferred from the wire. See resolveTopology.
    */
   modeHint?: DebateTopology | null;
+  /**
+   * REPLAY only: the original run's recorded elapsed ms at the playhead
+   * (useEventPlayer.recordedElapsedMs), forwarded to the cost ticker so
+   * ELAPSED reflects the recorded timeline, never the playback wall clock.
+   */
+  replayElapsedMs?: number | null;
 }) {
   const { topology, mode } = useMemo(
     () => resolveTopology(state, modeHint),
@@ -76,7 +83,7 @@ export function Cockpit({
               {topology.nodes.length} nodes · debate {mode}
             </span>
           </div>
-          <CostTicker state={state} />
+          <CostTicker state={state} replayElapsedMs={replayElapsedMs} />
         </div>
 
         <PipelineCanvas topology={topology} statuses={statuses} />

@@ -79,6 +79,32 @@ describe("compileReplay timing", () => {
     expect(ticks.map((t) => t.node)).toEqual(["router", "reporter"]);
   });
 
+  it("carries the ORIGINAL run's elapsed ms per step (unclamped ts deltas)", () => {
+    // fixture ts_ms: 1000,1010,1020,1030,1035,1040,1050,1060 — the recorded
+    // offsets are the real run's elapsed, NOT the clamped synthetic cadence.
+    const { steps } = compileReplay(fixtureEvents);
+    expect(steps.map((s) => s.recordedOffsetMs)).toEqual([0, 10, 20, 30, 35, 40, 50, 60]);
+  });
+
+  it("recorded offsets fall back to the synthetic gap when ts_ms is missing", () => {
+    const events: ReplayEvent[] = [
+      { name: "start", data: { type: "start", run_id: "r", ticker: "X", investor_mode: "Neutral" } },
+      { name: "done", data: { type: "done", run_id: "r", final_report: "", final_decision: {}, run_metrics: [] } },
+    ];
+    const { steps } = compileReplay(events);
+    expect(steps[0]!.recordedOffsetMs).toBe(0);
+    expect(steps[1]!.recordedOffsetMs).toBe(MIN_STEP_MS);
+  });
+
+  it("recorded offsets never regress on out-of-order ts_ms (zero-floored gap)", () => {
+    const events: ReplayEvent[] = [
+      { name: "start", ts_ms: 500, data: { type: "start", run_id: "r", ticker: "X", investor_mode: "Neutral" } },
+      { name: "done", ts_ms: 400, data: { type: "done", run_id: "r", final_report: "", final_decision: {}, run_metrics: [] } },
+    ];
+    const { steps } = compileReplay(events);
+    expect(steps[1]!.recordedOffsetMs).toBe(0);
+  });
+
   it("skips undecodable records without breaking the offset chain", () => {
     const events: ReplayEvent[] = [
       { name: "start", ts_ms: 0, data: { type: "start", run_id: "r", ticker: "X", investor_mode: "Neutral" } },

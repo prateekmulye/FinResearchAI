@@ -40,28 +40,43 @@ function Stat({
   );
 }
 
-export function CostTicker({ state }: { state: AnalysisStreamState }) {
+export function CostTicker({
+  state,
+  replayElapsedMs = null,
+}: {
+  state: AnalysisStreamState;
+  /**
+   * REPLAY: the ORIGINAL run's recorded elapsed ms at the playhead (from
+   * useEventPlayer.recordedElapsedMs). When set, ELAPSED renders this and the
+   * wall clock is never consulted — replay state stamps node lifecycles with
+   * synthetic fold ticks, and `Date.now() - tick` renders raw epoch seconds.
+   */
+  replayElapsedMs?: number | null;
+}) {
   const totals = costTotals(state);
   const active = state.phase === "connecting" || state.phase === "streaming";
+  const isReplay = replayElapsedMs != null;
 
-  // 1Hz wall clock only while active, so elapsed advances without re-rendering
-  // the whole cockpit on every frame.
+  // 1Hz wall clock only while live + active, so elapsed advances without
+  // re-rendering the whole cockpit on every frame. Replay never ticks: its
+  // elapsed is welded to the recorded timeline, not to wall time.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    if (!active) return;
+    if (!active || isReplay) return;
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
-  }, [active]);
+  }, [active, isReplay]);
 
   // Wall-clock elapsed while live and at done. Only a trivially short wall
   // clock (< 2s — a near-instant cached/fake run) is substituted with the
   // summed per-node latency: on a real run parallel nodes routinely make that
   // sum EXCEED the wall time, so it must never replace it.
   const wall = elapsedSeconds(state, now);
-  const elapsed =
+  const liveElapsed =
     state.phase === "done" && wall < 2 && totals.latencyS > wall
       ? totals.latencyS
       : wall;
+  const elapsed = isReplay ? replayElapsedMs / 1000 : liveElapsed;
 
   // Flash the token/cost stats whenever a new node reports (collision-driven).
   // role="group", NOT a live region: the 1Hz clock would announce every second.

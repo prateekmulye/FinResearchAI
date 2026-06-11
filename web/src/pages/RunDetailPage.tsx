@@ -152,8 +152,14 @@ function ReplayTheater({ run }: { run: RunDetail }) {
         </p>
       )}
 
-      {/* The cockpit — driven entirely by the replay state. Zero changes. */}
-      <Cockpit state={player.state} modeHint={modeHint} />
+      {/* The cockpit — driven entirely by the replay state. ELAPSED reads the
+          recorded run's own timing at the playhead (recordedElapsedMs), never
+          the playback wall clock. */}
+      <Cockpit
+        state={player.state}
+        modeHint={modeHint}
+        replayElapsedMs={player.recordedElapsedMs}
+      />
     </div>
   );
 }

@@ -26,6 +26,7 @@ function makePlayer(over: Partial<EventPlayerControls> = {}): EventPlayerControl
     speed: 4,
     elapsedMs: 2000,
     durationMs: 8000,
+    recordedElapsedMs: 1500,
     progress: 0.25,
     stageTicks: [
       { offsetMs: 1000, node: "router" },

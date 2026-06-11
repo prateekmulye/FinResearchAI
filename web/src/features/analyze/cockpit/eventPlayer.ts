@@ -60,6 +60,14 @@ export interface EventPlayerControls {
   /** Current playhead time (ms) and total duration (ms), synthetic 1x scale. */
   elapsedMs: number;
   durationMs: number;
+  /**
+   * Elapsed ms in the ORIGINAL recorded run at the playhead (the recorded
+   * ts_ms delta of the last due event). The cockpit's ELAPSED readout shows
+   * this during replay — the run's own timing, never the playback wall clock
+   * (replay state stamps are synthetic fold ticks; subtracting them from
+   * Date.now() renders raw epoch seconds).
+   */
+  recordedElapsedMs: number;
   /** 0..1 progress, for the scrubber fill. */
   progress: number;
   /** Stage ticks (node_complete offsets) for the pipeline-mapped scrubber. */
@@ -117,6 +125,11 @@ export function useEventPlayer(events: readonly ReplayEvent[]): EventPlayerContr
 
   // Derived render state — a pure fold of the due steps (re-runs per event).
   const state = useMemo(() => reduceFirstN(steps, dueCount), [steps, dueCount]);
+
+  // The original run's elapsed at the playhead — advances stepwise as recorded
+  // events land (same collision-driven cadence as the cost ticker's totals).
+  const recordedElapsedMs =
+    dueCount > 0 ? steps[dueCount - 1]!.recordedOffsetMs : 0;
 
   const rafRef = useRef<number | null>(null);
   const lastTsRef = useRef<number | null>(null);
@@ -256,6 +269,7 @@ export function useEventPlayer(events: readonly ReplayEvent[]): EventPlayerContr
     speed,
     elapsedMs: timeMs,
     durationMs,
+    recordedElapsedMs,
     progress: durationMs > 0 ? timeMs / durationMs : 0,
     stageTicks,
   };
