@@ -97,6 +97,38 @@ async def test_run_eval_persists_summary_and_pairs_to_warehouse(
     assert first["judge_preferred"] == "on"
 
 
+async def test_run_eval_one_judge_failure_skips_ticker_and_completes(
+    monkeypatch, tmp_path, caplog
+):
+    """One judge exception must not kill the batch: the failed ticker lands unjudged
+    (judge_* fields None, n_judged excludes it) and both reports are still written."""
+
+    async def fake_run_ab(tickers, *, investor_mode="Neutral", concurrency=3):
+        return list(_PAIRS)
+
+    async def fake_judge(*, ticker, context, decision_on, decision_off, **kwargs):
+        if ticker == "AAPL":
+            raise RuntimeError("judge model offline")
+        return _VERDICTS[ticker]
+
+    monkeypatch.setattr(run_mod, "run_ab", fake_run_ab)
+    monkeypatch.setattr(run_mod, "judge_decision", fake_judge)
+
+    with caplog.at_level("WARNING"):
+        md_path = await run_eval(_write_tickers(tmp_path), "wp14", 2, str(tmp_path))
+
+    assert md_path.exists()
+    report = json.loads((tmp_path / "report-wp14.json").read_text(encoding="utf-8"))
+    assert report["summary"]["n_tickers"] == 2
+    assert report["summary"]["n_judged"] == 1  # AAPL unjudged, MSFT judged
+    rows = {r["ticker"]: r for r in report["per_ticker"]}
+    assert rows["AAPL"]["judge_preferred"] is None
+    assert rows["MSFT"]["judge_preferred"] == "off"
+    failures = [r for r in caplog.records if "judge failed" in r.getMessage()]
+    assert failures, "expected a judge-failure degrade warning"
+    assert failures[0].exc_info is not None
+
+
 async def test_run_eval_disabled_warehouse_still_writes_reports(monkeypatch, tmp_path):
     # env_isolation (autouse) scrubbed DATABASE_URL -> warehouse disabled.
     _patch_eval_seams(monkeypatch)

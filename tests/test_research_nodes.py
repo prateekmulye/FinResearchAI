@@ -81,6 +81,30 @@ async def test_facilitator_runs_debate_and_writes_full_research_debate(fake_llm_
 
 
 @pytest.mark.asyncio
+async def test_facilitator_survives_debate_llm_failure(fake_llm_factory):
+    """A debate-LLM failure must not abort the node ("a single failure never aborts
+    the graph"): the facilitator still writes a verdict and keeps its metric line."""
+    fake_llm_factory(
+        [
+            RuntimeError("debate model offline"),  # first debate turn explodes
+            DebateTurn(role="bull", round=1, argument="verdict despite failed debate"),
+        ],
+        ["src.agents.debate", "src.agents.research.facilitator"],
+    )
+    from src.agents.research.facilitator import facilitator
+
+    state = _synthetic_state()
+    state["research_debate"] = {"bull_thesis": "bull case", "bear_thesis": "bear case"}
+
+    out = await facilitator(state)  # must not raise
+    rd = out["research_debate"]
+    assert rd["facilitator_verdict"] == "verdict despite failed debate"
+    assert rd["rounds"] == []  # debate ended before any turn landed
+    nodes = {m["node"] for m in out["run_metrics"]}
+    assert "facilitator" in nodes  # the node keeps its per-node trace line
+
+
+@pytest.mark.asyncio
 async def test_facilitator_merge_preserves_bull_and_bear_theses(fake_llm_factory):
     """After bull→bear→facilitator the merged research_debate retains all three fields.
 

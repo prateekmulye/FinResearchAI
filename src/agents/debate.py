@@ -46,6 +46,9 @@ async def run_debate(
     Returns:
         (turns, metrics_per_node) where turns is a flat list of DebateTurn in
         speaking order and metrics_per_node is CostTracker.totals()["per_node"].
+        A turn whose LLM call raises ends the debate early (warning logged with
+        traceback); the turns gathered so far are returned and the exception is
+        NEVER propagated — a single failure must not abort the graph.
     """
     # F3: clamp rounds into [1, max_rounds] and warn if capped
     effective_rounds = max(1, min(rounds, max_rounds))
@@ -71,7 +74,20 @@ async def run_debate(
                 f"Set role='{role}' and round={rnd} in your response."
             )
             messages = [SystemMessage(content=system_prompt), HumanMessage(content=human)]
-            turn: DebateTurn | None = await llm.ainvoke(messages, config={"callbacks": [tracker]})
+            try:
+                turn: DebateTurn | None = await llm.ainvoke(
+                    messages, config={"callbacks": [tracker]}
+                )
+            except Exception:
+                # Degrade contract: a single LLM failure must never abort the graph.
+                # End the debate early with the turns accumulated so far; the caller
+                # (facilitator/arbiter) continues with a shorter transcript.
+                logger.warning(
+                    "run_debate[%s]: turn failed (round %d, role %s); ending debate "
+                    "early with %d turn(s)",
+                    node_label, rnd, role, len(turns), exc_info=True,
+                )
+                return turns, tracker.totals()["per_node"]
             # F1: guard against None returned by weak models that emit no parseable output
             if turn is None:
                 continue

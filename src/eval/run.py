@@ -15,12 +15,15 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import logging
 from pathlib import Path
 
 from src.eval.harness import PairedResult, run_ab
 from src.eval.judge import JudgeVerdict, judge_decision
 from src.eval.report import _per_ticker_rows, aggregate, write_report
 from src.warehouse.ingest import record_eval_result
+
+_LOG = logging.getLogger(__name__)
 
 
 def load_tickers(path: str) -> list[str]:
@@ -39,18 +42,25 @@ def _context_for(pair: PairedResult) -> str:
 async def _judge_all(pairs: list[PairedResult], concurrency: int) -> dict[str, JudgeVerdict]:
     sem = asyncio.Semaphore(concurrency)
 
-    async def _one(p: PairedResult) -> tuple[str, JudgeVerdict]:
+    async def _one(p: PairedResult) -> tuple[str, JudgeVerdict | None]:
         async with sem:
-            v = await judge_decision(
-                ticker=p.ticker,
-                context=_context_for(p),
-                decision_on=p.decision_on,
-                decision_off=p.decision_off,
-            )
+            try:
+                v = await judge_decision(
+                    ticker=p.ticker,
+                    context=_context_for(p),
+                    decision_on=p.decision_on,
+                    decision_off=p.decision_off,
+                )
+            except Exception:
+                # One judge failure must not kill the batch: leave the ticker
+                # unjudged — aggregate()'s n_judged machinery tolerates missing
+                # verdicts — and let the report land for everything else.
+                _LOG.warning("eval judge failed for %s; leaving unjudged", p.ticker, exc_info=True)
+                return p.ticker, None
         return p.ticker, v
 
     results = await asyncio.gather(*(_one(p) for p in pairs))
-    return dict(results)
+    return {ticker: verdict for ticker, verdict in results if verdict is not None}
 
 
 async def run_eval(tickers_path: str, label: str, concurrency: int, out_dir: str) -> Path:

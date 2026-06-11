@@ -153,6 +153,35 @@ async def test_arbiter_survives_store_verdict_failure(monkeypatch, make_fake_llm
 
 
 @pytest.mark.asyncio
+async def test_arbiter_survives_debate_llm_failure(monkeypatch, make_fake_llm):
+    """The REAL run_debate with a raising LLM must not abort the arbiter: it still
+    renders a FinalDecision and keeps its metric line (degrade contract)."""
+    import src.agents.debate as debate_mod
+
+    decision = FinalDecision(action="HOLD", conviction=0.5, score=50, rationale="ok")
+    fake = make_fake_llm([decision])
+    monkeypatch.setattr(arb_mod, "get_llm", lambda tier: fake)
+    monkeypatch.setattr(arb_mod, "store_verdict", _noop_store_verdict)
+
+    class _ExplodingStructured:
+        async def ainvoke(self, messages, config=None, **kwargs):
+            raise ConnectionError("debate LLM unreachable")
+
+    class _ExplodingLLM:
+        def with_structured_output(self, schema, method=None):
+            return _ExplodingStructured()
+
+    monkeypatch.setattr(debate_mod, "get_llm", lambda tier: _ExplodingLLM())
+
+    out = await arb_mod.risk_arbiter(_base_state())  # must not raise
+
+    assert out["final_decision"] == decision.model_dump()
+    assert out["risk_debate"]["rounds"] == []  # debate degraded to zero turns
+    nodes = {m["node"] for m in out["run_metrics"]}
+    assert "risk_arbiter" in nodes  # the node keeps its per-node trace line
+
+
+@pytest.mark.asyncio
 async def test_arbiter_metrics_include_debate_and_arbiter(monkeypatch, make_fake_llm):
     decision = FinalDecision(action="HOLD", conviction=0.5, score=50, rationale="x")
     fake = make_fake_llm([decision])
