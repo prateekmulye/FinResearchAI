@@ -148,7 +148,9 @@ jobs:
 
       - name: Gitleaks (secret scanning, full history)
         # Public repo under a personal account: no GITLEAKS_LICENSE needed.
-        uses: gitleaks/gitleaks-action@v3
+        # SHA-pinned (reads the GITHUB_TOKEN — a repointed tag must not be able
+        # to abuse it). Update the comment when bumping.
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -223,6 +225,15 @@ jobs:
           # Justified escapes only — every entry carries a removal condition.
           trivyignores: .trivyignore
 
+      - name: Trivy scan (caddy edge image)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: finresearch-caddy:latest
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+          ignore-unfixed: true
+          trivyignores: .trivyignore
+
       - name: Boot the stack (fake-LLM demo mode, plain :80)
         run: docker compose -f docker-compose.prod.yml up -d --wait --wait-timeout 240
 
@@ -247,6 +258,7 @@ jobs:
           grep -qi '^referrer-policy:' /tmp/headers.txt
           grep -qi '^content-security-policy:' /tmp/headers.txt
           grep -qi '^strict-transport-security:' /tmp/headers.txt
+          grep -qi '^permissions-policy:' /tmp/headers.txt
 
       - name: "Smoke: POST /api/analyze streams SSE to done"
         run: |

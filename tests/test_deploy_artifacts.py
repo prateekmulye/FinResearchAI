@@ -179,8 +179,14 @@ class TestCaddyfile:
             "Referrer-Policy",
             "X-Frame-Options",
             "Content-Security-Policy",
+            "Permissions-Policy",
         ):
             assert header in text, f"missing {header}"
+
+    def test_permissions_policy_disables_sensitive_features(self, text: str) -> None:
+        pp = next(line for line in text.splitlines() if "Permissions-Policy" in line)
+        for feature in ("camera=()", "microphone=()", "geolocation=()"):
+            assert feature in pp, f"Permissions-Policy must disable {feature}"
 
     def test_csp_allows_self_connect_for_sse(self, text: str) -> None:
         csp = next(line for line in text.splitlines() if "Content-Security-Policy" in line)

@@ -94,6 +94,15 @@ class TestCiWorkflow:
         # Vuln escapes must be explicit --ignore-vuln pins, never a soft job.
         assert "continue-on-error" not in text
 
+    def test_gitleaks_is_sha_pinned(self, jobs: dict) -> None:
+        # gitleaks reads the GITHUB_TOKEN: secret-adjacent third-party actions
+        # are pinned to a full commit SHA (a moving tag could be repointed at
+        # malicious code), with the tag kept as a comment for humans.
+        text = _steps_text(jobs["security"])
+        assert re.search(r"gitleaks/gitleaks-action@[0-9a-f]{40}\b", text), (
+            "pin gitleaks-action to a 40-hex commit SHA, not a tag"
+        )
+
     def test_e2e_smoke_is_fenced_off_prs(self, jobs: dict) -> None:
         cond = jobs["e2e-smoke"]["if"]
         assert "workflow_dispatch" in cond
@@ -126,6 +135,14 @@ class TestCiWorkflow:
         # condition; the file must exist as long as the workflow points at it.
         assert "trivyignores: .trivyignore" in text
         assert (ROOT / ".trivyignore").is_file()
+
+    def test_trivy_scans_both_compose_images(self, jobs: dict) -> None:
+        # The prod stack ships TWO images (app runtime + the Caddy edge); both
+        # must pass the same CRITICAL/HIGH gate.
+        text = _steps_text(jobs["e2e-smoke"])
+        assert "image-ref: finresearch-app:latest" in text
+        assert "image-ref: finresearch-caddy:latest" in text
+        assert text.count("aquasecurity/trivy-action@") >= 2
 
     def test_no_real_api_key_secrets_ever_reach_ci(self, raw: str) -> None:
         # The only secret CI may touch is the ephemeral GITHUB_TOKEN.
@@ -185,6 +202,15 @@ class TestDeployWorkflow:
         assert "workflow_run.head_sha" in text
         assert "git checkout --detach" in text
         assert "docker-compose.prod.yml up -d --build" in text
+
+    def test_ssh_action_is_sha_pinned(self, wf: dict) -> None:
+        # ssh-action receives the VPS private key: secret-adjacent third-party
+        # actions are pinned to a full commit SHA (a moving tag could be
+        # repointed at malicious code), tag kept as a comment for humans.
+        text = _steps_text(wf["jobs"]["deploy"])
+        assert re.search(r"appleboy/ssh-action@[0-9a-f]{40}\b", text), (
+            "pin ssh-action to a 40-hex commit SHA, not a tag"
+        )
 
 
 # ----------------------------------------------------- vuln-escape rot guard

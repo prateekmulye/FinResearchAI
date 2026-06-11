@@ -129,9 +129,14 @@ configured per §3. Once armed, each deploy:
 
 - pushes both image targets to GHCR (`ghcr.io/prateekmulye/finresearchai-app`
   and `...-caddy`, tagged `latest` + commit sha) — the rollback artifact;
-- SSHes to the VPS and runs `git pull --ff-only` +
+- SSHes to the VPS and runs `git fetch origin main` + a detached
+  `git checkout` of the exact CI-validated commit SHA, then
   `docker compose -f docker-compose.prod.yml up -d --build` (§5's update path:
   the VPS builds from source; it does not pull GHCR images).
+
+Note: a **manually dispatched** deploy (`workflow_dispatch`) skips the
+CI-success check — it builds and ships whatever `github.sha` points at, so only
+dispatch it from a ref you know is green.
 
 To pause deploys, set `DEPLOY_ENABLED` to anything but `true` — the workflow
 goes back to green no-op. Dependabot (`.github/dependabot.yml`) files weekly

@@ -8,9 +8,10 @@
 #
 #   build-push  GHCR images for both Dockerfile targets (runtime + caddy),
 #               tagged latest + commit sha — the artifact/rollback story.
-#   deploy      SSH to the VPS: git pull + `docker compose up -d --build`
-#               (the canonical update path from docs/deploy.md §5; the VPS
-#               builds from source and does not consume GHCR — yet).
+#   deploy      SSH to the VPS: git fetch + checkout of the CI-validated SHA,
+#               then `docker compose up -d --build` (the canonical update path
+#               from docs/deploy.md §5; the VPS builds from source and does
+#               not consume GHCR — yet).
 name: Deploy
 
 on:
@@ -84,7 +85,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=caddy
 
   deploy:
-    name: deploy to VPS (git pull + compose up)
+    name: deploy to VPS (checkout CI SHA + compose up)
     # needs: a skipped build-push skips this job too; the explicit gate is
     # belt-and-braces so a future `if: always()` edit can't fire SSH unarmed.
     needs: build-push
@@ -93,7 +94,9 @@ jobs:
 
     steps:
       - name: SSH to the VPS and roll the stack
-        uses: appleboy/ssh-action@v1.2.5
+        # SHA-pinned (receives the VPS private key — a repointed tag must not
+        # be able to exfiltrate it). Update the comment when bumping.
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
