@@ -22,7 +22,7 @@ dependencies = [
 
 [project.optional-dependencies]
 web     = ["firecrawl-py==4.28.2"]
-data    = ["yfinance==0.2.66", "tradingview-ta==3.3.0"]
+data    = ["yfinance==1.4.1", "tradingview-ta==3.3.0"]
 api = [
     "fastapi==0.136.3",
     "uvicorn[standard]==0.48.0",
