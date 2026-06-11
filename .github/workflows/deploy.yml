@@ -22,7 +22,6 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 concurrency:
   group: deploy-production
@@ -38,6 +37,11 @@ jobs:
       (github.event_name == 'workflow_dispatch' ||
        github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
+    # packages: write only where GHCR is pushed; the SSH job keeps the
+    # workflow-default read-only token.
+    permissions:
+      contents: read
+      packages: write
 
     steps:
       - name: Checkout (the exact commit CI validated)
@@ -97,7 +101,10 @@ jobs:
           script: |
             set -e
             cd /opt/finresearchai
-            git pull --ff-only origin main
+            # Deploy the exact commit CI validated — a commit landing between
+            # CI start and this SSH must not ship under the previous green.
+            git fetch origin main
+            git checkout --detach ${{ github.event.workflow_run.head_sha || github.sha }}
             # Compose builds from source on the VPS (docs/deploy.md §5); the
             # GHCR images above are the rollback artifact, not the deploy path.
             docker compose -f docker-compose.prod.yml up -d --build

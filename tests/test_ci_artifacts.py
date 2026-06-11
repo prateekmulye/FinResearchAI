@@ -15,6 +15,7 @@ What is locked down:
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -113,8 +114,11 @@ class TestCiWorkflow:
 
     def test_trivy_gate_pinned_with_severity_and_exit_code(self, jobs: dict) -> None:
         text = _steps_text(jobs["e2e-smoke"])
-        assert "aquasecurity/trivy-action@" in text
-        assert "trivy-action@master" not in text, "pin a trivy-action release"
+        # Pin a real release tag (the repo tags are v-prefixed; bare 0.36.0
+        # does not exist), never a moving branch ref like @master/@main.
+        assert re.search(r"aquasecurity/trivy-action@v\d+\.\d+\.\d+", text), (
+            "pin trivy-action to a vX.Y.Z release tag"
+        )
         assert "CRITICAL,HIGH" in text
         assert "exit-code: '1'" in text
         assert "ignore-unfixed: true" in text
@@ -165,7 +169,10 @@ class TestDeployWorkflow:
         assert "ghcr.io/prateekmulye/finresearchai-caddy" in text
         assert "target: runtime" in text
         assert "target: caddy" in text
-        assert wf["permissions"]["packages"] == "write"
+        # packages:write is scoped to the build-push job only; the SSH job
+        # keeps the workflow-default read-only token.
+        assert wf["jobs"]["build-push"]["permissions"]["packages"] == "write"
+        assert wf["permissions"] == {"contents": "read"}
 
     def test_deploy_ssh_parameterized_via_secrets(self, wf: dict) -> None:
         deploy = wf["jobs"]["deploy"]
@@ -173,8 +180,51 @@ class TestDeployWorkflow:
         text = _steps_text(deploy)
         for secret in ("secrets.VPS_HOST", "secrets.VPS_USER", "secrets.VPS_SSH_KEY"):
             assert secret in text, f"missing {secret}"
-        assert "git pull --ff-only" in text
+        # The VPS must check out the exact CI-validated SHA, never a moving
+        # branch HEAD (a commit landing mid-pipeline must not ship unvalidated).
+        assert "workflow_run.head_sha" in text
+        assert "git checkout --detach" in text
         assert "docker-compose.prod.yml up -d --build" in text
+
+
+# ----------------------------------------------------- vuln-escape rot guard
+class TestVulnEscapesCannotRot:
+    """Each pip-audit --ignore-vuln / .trivyignore escape exists only while the
+    vulnerable exact pin it excuses is still in pyproject.toml. When Dependabot
+    bumps a pin, the corresponding escape MUST be deleted — this test makes the
+    bump PR fail until it is."""
+
+    # advisory id -> the exact vulnerable pin it excuses
+    ESCAPED = {
+        "CVE-2026-26013": 'langchain-core==1.2.5',
+        "CVE-2026-40087": 'langchain-core==1.2.5',
+        "CVE-2026-44843": 'langchain-core==1.2.5',
+        "PYSEC-2026-76": 'langchain-openai==1.1.6',
+        "PYSEC-2026-83": 'langgraph==1.0.4',
+        "CVE-2026-27794": 'langgraph==1.0.4',  # transitive langgraph-checkpoint
+        "CVE-2025-71176": 'pytest==8.4.2',
+    }
+
+    def test_every_escape_still_excuses_a_live_vulnerable_pin(self) -> None:
+        ci = CI_YML.read_text(encoding="utf-8")
+        trivyignore = (ROOT / ".trivyignore").read_text(encoding="utf-8")
+        pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        for advisory, pin in self.ESCAPED.items():
+            escaped = advisory in ci or advisory in trivyignore
+            if escaped:
+                assert pin in pyproject, (
+                    f"{advisory} is escaped but {pin} is gone from pyproject.toml "
+                    "— the dependency was bumped, DELETE the stale escape "
+                    "(ci.yml --ignore-vuln and/or .trivyignore) and this entry."
+                )
+
+    def test_no_unknown_escapes_sneak_in(self) -> None:
+        ci = CI_YML.read_text(encoding="utf-8")
+        found = set(re.findall(r"--ignore-vuln\s+(\S+)", ci))
+        assert found <= set(self.ESCAPED), (
+            f"unaudited pip-audit escapes: {found - set(self.ESCAPED)} — "
+            "add them here with their vulnerable pin or remove them."
+        )
 
 
 # ------------------------------------------------------------- dependabot.yml

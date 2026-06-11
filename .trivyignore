@@ -3,7 +3,8 @@
 # LLM framework pins is a coordinated dependency-finalization change (the
 # frozen WP-I contract), not a CI patch — Dependabot (.github/dependabot.yml)
 # files those bump PRs weekly. REMOVE each entry when the bump lands.
-# Mirrored as --ignore-vuln escapes in the pip-audit step of ci.yml.
+# Most IDs are mirrored as --ignore-vuln escapes in ci.yml; CVE-2026-34070 is
+# deliberately NOT mirrored (absent from the PyPI advisory feed pip-audit reads).
 
 # langchain-core 1.2.5 -> fixed in 1.2.22. Path traversal in the LEGACY
 # load_prompt() helpers — FinResearchAI never loads prompts from disk paths
