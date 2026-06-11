@@ -15,7 +15,9 @@ run_metrics holds all per-node entries — 12 for the on-topology stub graph).
 """
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 import time
 import uuid
 from collections.abc import AsyncIterator
@@ -35,6 +37,15 @@ from src.config.settings import get_settings
 from src.graph import build_graph
 from src.obs.recorder import RunRecorder
 from src.warehouse.ingest import record_run_events, record_run_finish, record_run_start
+
+
+_LOG = logging.getLogger(__name__)
+
+# Strong refs to the detached finalize tasks scheduled from the stream's finally
+# block (see analyze_event_stream): asyncio only keeps weak refs to tasks, so
+# without this set a backgrounded finalize could be garbage-collected mid-write.
+# Tasks discard themselves on completion.
+_FINALIZE_TASKS: set[asyncio.Task[None]] = set()
 
 
 def _node_from_messages_meta(metadata: dict[str, Any]) -> str:
@@ -80,7 +91,7 @@ class _RunPersistence:
         return event
 
     def mark_done(
-        self, *, final_decision: dict[str, Any], report: str, metrics: list[Any]
+        self, *, final_decision: dict[str, Any] | None, report: str, metrics: list[Any]
     ) -> None:
         self.status = "finished"
         self.final_decision = final_decision
@@ -124,9 +135,9 @@ async def analyze_event_stream(
     """Yield sse-starlette event dicts for one analysis run over the compiled graph.
 
     Persists two run records, both flushed even if the stream errors mid-run:
-    a JSONL trace via RunRecorder (local fallback; ``GET /runs/{run_id}`` replays
-    it) and — when the warehouse is enabled — a ``runs`` row plus the full ordered
-    SSE event stream in ``run_events`` (WP-4; never affects streaming).
+    a JSONL trace via RunRecorder (local fallback; ``GET /api/runs/{run_id}``
+    replays it) and — when the warehouse is enabled — a ``runs`` row plus the full
+    ordered SSE event stream in ``run_events`` (WP-4; never affects streaming).
     """
     run_id = run_id or uuid.uuid4().hex[:12]
     recorder = RunRecorder(runs_dir=runs_dir, run_id=run_id)
@@ -169,11 +180,14 @@ async def analyze_event_stream(
                 # full reducer-accumulated state snapshot; keep the latest.
                 final_state = chunk or final_state
 
-        decision = final_state.get("final_decision") or {}
+        # No decision in the final state persists as NULL (the RunDetail
+        # null contract); the done SSE payload keeps its {} sentinel via
+        # done_payload, so the wire shape is unchanged.
+        decision = final_state.get("final_decision") or None
         report = final_state.get("final_report", "")
         metrics = final_state.get("run_metrics", []) or []
         recorder.record(
-            "__run__", "done", {"final_decision": decision, "run_metrics": metrics}
+            "__run__", "done", {"final_decision": decision or {}, "run_metrics": metrics}
         )
         persistence.mark_done(final_decision=decision, report=report, metrics=metrics)
         yield persistence.capture(
@@ -181,14 +195,38 @@ async def analyze_event_stream(
             done_payload(run_id, final_report=report, final_decision=decision, run_metrics=metrics),
         )
     except Exception as exc:  # never leak a 500 mid-stream: emit a clean error event
+        # Full exception text goes to the server log + JSONL trace only — raw
+        # str(exc) can carry URLs, file paths or provider details; the client
+        # gets a generic message with the run_id for support correlation.
+        _LOG.exception("analyze stream failed (run_id %s)", run_id)
         recorder.record("__run__", "error", {"error": str(exc)})
         persistence.mark_error()
-        yield persistence.capture("error", error_payload(run_id, str(exc)))
+        yield persistence.capture(
+            "error",
+            error_payload(run_id, f"analysis failed — see server logs (run_id {run_id})"),
+        )
     finally:
         # Persist the traces regardless of success/failure/disconnect: JSONL so
-        # /runs/{id} resolves, then the warehouse (events before the run-finish
+        # /api/runs/{id} resolves, then the warehouse (events before the run-finish
         # row; both no-op/degrade when the warehouse is unavailable). A client
         # disconnect lands here via GeneratorExit (not the except above), so the
         # status stays "aborted" — we must only await here, never yield.
+        #
+        # A REAL disconnect cancels the consuming task (sse-starlette/anyio level
+        # cancellation), which re-delivers CancelledError at every await in this
+        # finally — a bare `await persistence.finalize()` would itself be
+        # cancelled and strand the run as status="running" forever. So: flush the
+        # JSONL synchronously (uncancellable), run finalize as a DETACHED task
+        # (strong-ref'd in _FINALIZE_TASKS so it can't be GC'd), and await it
+        # through asyncio.shield — when the shield's await is cancelled, the
+        # outer cancellation proceeds while the task completes in the background.
         recorder.flush()
-        await persistence.finalize()
+        task = asyncio.ensure_future(persistence.finalize())
+        _FINALIZE_TASKS.add(task)
+        task.add_done_callback(_FINALIZE_TASKS.discard)
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            # Swallow ONLY the delivery aimed at this await: the original
+            # cancellation resumes propagating after this finally block.
+            pass

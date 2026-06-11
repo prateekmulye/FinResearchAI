@@ -5,11 +5,12 @@ One FastAPI dependency (``demo_guard``) enforces, in order:
   1. **Admin bypass** — ``X-Admin-Token`` compared with
      ``secrets.compare_digest`` against ``settings.admin_token``. Only possible
      when a token is configured; empty/unset means no bypass exists. Admins
-     skip BOTH the per-minute limiter and the daily caps.
-  2. **Per-minute limiter** — the pre-existing sliding-window limiter
-     (``app.state.limiter``, the fast abuse brake). It runs inside this guard
-     so admin bypass and ordering live in exactly one place, and so a
-     minute-limited burst never burns daily quota.
+     skip BOTH the per-hour burst limiter and the daily caps.
+  2. **Per-hour burst limiter** — the pre-existing sliding-window limiter
+     (``app.state.limiter``, the fast abuse brake: 5 per rolling hour per IP
+     by default). It runs inside this guard so admin bypass and ordering live
+     in exactly one place, and so a burst-limited request never burns daily
+     quota.
   3. **Daily caps** — per-IP (``ip:{client_key}``) and ``global`` counters in
      the warehouse ``demo_quota`` table, keyed by UTC day.
 
@@ -26,9 +27,9 @@ The guard declares the request body (``AnalyzeRequest``), so schema-invalid
 requests 422 before any quota is consumed; the route receives the parsed body
 through the dependency.
 
-Degrade contract: warehouse disabled -> the daily caps no-op (the per-minute
-limiter still applies); a broken DB logs a warning and FAILS OPEN (a quota
-outage must not take down live demos — same ethos as the ingest layer).
+Degrade contract: warehouse disabled -> the daily caps no-op (the per-hour
+burst limiter still applies); a broken DB logs a warning and FAILS OPEN (a
+quota outage must not take down live demos — same ethos as the ingest layer).
 """
 from __future__ import annotations
 
@@ -91,7 +92,7 @@ def quota_key_for(request: Request) -> str:
 
 
 async def demo_guard(request: Request, req: AnalyzeRequest) -> AnalyzeRequest:
-    """Dependency for POST /api/analyze: admin bypass -> minute limiter -> daily caps."""
+    """Dependency for POST /api/analyze: admin bypass -> burst limiter -> daily caps."""
     if is_admin(request):
         return req
 
@@ -99,7 +100,7 @@ async def demo_guard(request: Request, req: AnalyzeRequest) -> AnalyzeRequest:
         raise HTTPException(status_code=429, detail="rate limit exceeded")
 
     if not warehouse_enabled():
-        return req  # no quota store -> daily caps no-op (minute limiter already applied)
+        return req  # no quota store -> daily caps no-op (burst limiter already applied)
 
     settings = get_settings()
     day = datetime.now(UTC).date()

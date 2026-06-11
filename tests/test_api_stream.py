@@ -1,4 +1,6 @@
+import asyncio
 import json
+import logging
 
 import pytest
 
@@ -79,7 +81,7 @@ async def test_every_event_data_is_json_with_run_id(offline_graph):
 
 
 @pytest.mark.asyncio
-async def test_stream_emits_error_event_on_graph_failure(monkeypatch):
+async def test_stream_emits_error_event_on_graph_failure(monkeypatch, caplog):
     import src.api.stream as stream_mod
 
     def boom(*a, **k):
@@ -89,13 +91,20 @@ async def test_stream_emits_error_event_on_graph_failure(monkeypatch):
     # is actually invoked instead of a graph cached by an earlier test.
     stream_mod._compiled_graph.cache_clear()
     monkeypatch.setattr(stream_mod, "build_graph", boom)
-    events = await _collect(
-        analyze_event_stream(
-            ticker="AAPL", investor_mode="Neutral", debate_mode="on", run_id="run-e"
+    with caplog.at_level(logging.ERROR, logger="src.api.stream"):
+        events = await _collect(
+            analyze_event_stream(
+                ticker="AAPL", investor_mode="Neutral", debate_mode="on", run_id="run-e"
+            )
         )
-    )
     assert events[-1]["event"] == "error"
-    assert "kaboom" in json.loads(events[-1]["data"])["message"]
+    # The client gets a generic message carrying only the run_id for support
+    # correlation; the raw exception text stays in the server log + JSONL trace.
+    message = json.loads(events[-1]["data"])["message"]
+    assert "kaboom" not in message
+    assert "run-e" in message
+    assert "see server logs" in message
+    assert "kaboom" in caplog.text  # full text reaches the operator
 
 
 def test_node_from_messages_meta_reads_langgraph_node():
@@ -225,6 +234,87 @@ async def test_stream_client_disconnect_persists_aborted(
     assert run.finished_at is not None
     assert run.final_decision is None
     assert [row.event["name"] for row in rows] == ["start"]
+
+
+@pytest.mark.asyncio
+async def test_stream_finalizes_when_cancelled_in_finally(
+    offline_graph, sqlite_warehouse, no_price_backfill
+):
+    """Real client disconnects (sse-starlette/anyio) CANCEL the consuming task,
+    and that cancellation re-delivers CancelledError at every await — including
+    the awaits inside the generator's finally. Finalize must still land: it runs
+    as a detached, shielded task, so the runs row reaches status="aborted" with
+    its events persisted instead of being stuck "running" forever."""
+    import src.api.stream as stream_mod
+
+    gen = analyze_event_stream(
+        ticker="AAPL", investor_mode="Neutral", debate_mode="on", run_id="run-wh6"
+    )
+    started = asyncio.Event()
+    parked = asyncio.Event()  # never set: parks the consumer mid-stream
+
+    async def consume():
+        try:
+            async for ev in gen:
+                if ev["event"] == "start":
+                    started.set()
+                    await parked.wait()
+        finally:
+            # sse-starlette closes the generator INSIDE the cancelled scope.
+            await gen.aclose()
+
+    task = asyncio.create_task(consume())
+    await started.wait()
+    # anyio-style LEVEL cancellation: re-cancel on every loop tick so any await
+    # in the generator's finally (a bare `await finalize()` included) is hit.
+    while not task.done():
+        task.cancel()
+        await asyncio.sleep(0)
+    assert task.cancelled()
+
+    # Drain the detached finalize task(s) the finally block scheduled.
+    await asyncio.gather(*stream_mod._FINALIZE_TASKS, return_exceptions=True)
+
+    run, rows = await _persisted("run-wh6")
+    assert run is not None
+    assert run.status == "aborted"
+    assert run.finished_at is not None
+    assert run.final_decision is None
+    assert [row.event["name"] for row in rows] == ["start"]
+
+
+@pytest.mark.asyncio
+async def test_stream_persists_null_decision_when_graph_yields_none(
+    sqlite_warehouse, monkeypatch
+):
+    """A run whose final state has no final_decision must persist NULL (the
+    RunDetail.final_decision null contract) while the done SSE payload keeps
+    its {} sentinel (the frontend handles {} — the wire shape is unchanged)."""
+    import src.api.stream as stream_mod
+
+    class _DecisionlessGraph:
+        async def astream(self, inputs, stream_mode=None):
+            yield ("values", {"final_report": "# no decision", "run_metrics": []})
+
+    stream_mod._compiled_graph.cache_clear()
+    monkeypatch.setattr(stream_mod, "build_graph", lambda mode: _DecisionlessGraph())
+    try:
+        events = await _collect(
+            analyze_event_stream(
+                ticker="AAPL", investor_mode="Neutral", debate_mode="on", run_id="run-wh7"
+            )
+        )
+    finally:
+        stream_mod._compiled_graph.cache_clear()  # don't leak the fake graph
+
+    done = json.loads(events[-1]["data"])
+    assert done["type"] == "done"
+    assert done["final_decision"] == {}  # SSE sentinel unchanged
+
+    run, _ = await _persisted("run-wh7")
+    assert run is not None
+    assert run.status == "finished"
+    assert run.final_decision is None  # DB honors the null contract
 
 
 @pytest.mark.asyncio

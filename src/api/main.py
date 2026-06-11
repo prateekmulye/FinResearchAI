@@ -10,10 +10,10 @@ Endpoints:
   GET  /healthz                  -> liveness probe (stays at root).
 
 The pre-v2 root routes (POST /analyze, GET /runs/{id}) are REMOVED — we own the
-only client (web/index.html), which now calls /api/analyze.
+only client (the React SPA in web/), which calls /api/analyze.
 
-Cross-cutting: CORS (open by default; tighten via ALLOWED_ORIGINS), a per-minute
-rate limiter (in-memory default, optional Redis seam) on the analyze route, and
+Cross-cutting: CORS (open by default; tighten via ALLOWED_ORIGINS), a per-hour
+burst limiter (in-memory default, optional Redis seam) on the analyze route, and
 input validation via AnalyzeRequest. The limiter and runs dir are app-scoped on
 ``app.state`` so the routers share them without module globals.
 """
@@ -39,6 +39,8 @@ from src.api.routes import search as search_routes
 
 def create_app(
     *,
+    # The per-hour burst limiter: 5 analyses per rolling 3600s window per
+    # client IP (the daily demo caps in demo_guard.py layer on top).
     rate_limit: int = 5,
     rate_window_s: int = 3600,
     runs_dir: str | None = None,
