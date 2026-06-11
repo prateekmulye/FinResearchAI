@@ -8,7 +8,7 @@ welcome.
 ```bash
 git clone <repo-url> && cd FinResearchAI
 python -m venv .venv && source .venv/bin/activate
-pip install -e ".[all]"            # all optional groups (memory, web, data, api, dev)
+pip install -e ".[all]"            # all optional groups (web, data, api, db, dev)
 cp .env.example .env               # add your own OLLAMA_API_KEY / FIRECRAWL_API_KEY
 ```
 
@@ -20,8 +20,16 @@ ruff check .            # lint
 mypy src                # type-check
 ```
 
+For frontend changes, also (from `web/`):
+
+```bash
+npm run lint && npm run typecheck && npm run test:run && npm run build
+```
+
 - **Tests are offline by default.** Live tests (real Ollama Cloud + Firecrawl) are marked
   `@pytest.mark.live` and deselected; run one with `RUN_LIVE=1 python -m pytest -m live`.
+  Postgres integration tests are marked `db` and also deselected; run them with
+  `docker compose up -d db` then `python -m pytest -m db`.
 - **TDD:** write the failing test first, confirm it fails, implement, confirm green.
 - **Structured output only:** nodes use `with_structured_output(Schema, method=STRUCT_METHOD)`
   — never JSON string-scraping.
@@ -32,7 +40,9 @@ mypy src                # type-check
 
 - Conventional commits (`feat:`, `fix:`, `test:`, `docs:`, `chore:` …).
 - One logical change per PR; include tests for behavior changes.
-- CI (ruff + mypy + offline pytest on Python 3.11/3.13) must be green before review.
+- CI must be green before review: backend (ruff + mypy + offline pytest on Python
+  3.11/3.13), frontend (lint + typecheck + vitest + build), Postgres integration,
+  and security (gitleaks + pip-audit + npm audit) jobs.
 
 ## Architecture guardrails
 
