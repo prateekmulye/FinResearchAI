@@ -14,7 +14,7 @@ COPY web/ ./
 RUN npm run build
 
 # ---- Stage 2: build the python runtime into a self-contained venv ---------
-FROM python:3.13-slim AS py-builder
+FROM python:3.14-slim AS py-builder
 WORKDIR /build
 # setuptools package discovery (include = ["src*", "scripts*"]) needs the
 # source tree present to build/install the project.
@@ -31,7 +31,7 @@ RUN pip install --no-cache-dir --upgrade pip \
  && pip install --no-cache-dir ".[api,db,web,data]"
 
 # ---- Stage 3: slim runtime (compose service: app) --------------------------
-FROM python:3.13-slim AS runtime
+FROM python:3.14-slim AS runtime
 RUN useradd -m -u 1000 appuser
 WORKDIR /app
 COPY --from=py-builder /opt/venv /opt/venv
