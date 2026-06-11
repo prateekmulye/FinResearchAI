@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import asdict, dataclass
+from typing import Any
 
 from langchain_core.callbacks import BaseCallbackHandler
 
@@ -30,7 +31,9 @@ class CostTracker(BaseCallbackHandler):
     def __init__(self, node: str = "unknown") -> None:
         self.node = node
         self.records: list[NodeCost] = []
-        self._starts: dict[str | None, float] = {}
+        # Keyed by run_id, which LangChain passes as a UUID (fakes pass str,
+        # and it may be None) — honest typing is Any, not str | None.
+        self._starts: dict[Any, float] = {}
 
     def on_llm_start(self, serialized, prompts, *, run_id=None, **kwargs) -> None:
         self._starts[run_id] = time.perf_counter()

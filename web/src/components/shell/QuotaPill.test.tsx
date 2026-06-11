@@ -74,4 +74,23 @@ describe("QuotaPill — states", () => {
       expect(screen.getByText(/unmetered demo/i)).toBeInTheDocument(),
     );
   });
+
+  it("shows the neutral 'quota unavailable' on a degraded read (DB outage)", async () => {
+    // Backend answers 200 with degraded:true + null counters when the quota
+    // DB read fails — the pill must say "unavailable", never "replay-only".
+    mockQuota({
+      metered: true,
+      degraded: true,
+      ip_used: null,
+      ip_limit: null,
+      global_used: null,
+      global_limit: null,
+      admin: false,
+    });
+    renderWithProviders(<QuotaPill />);
+    await waitFor(() =>
+      expect(screen.getByText(/quota unavailable/i)).toBeInTheDocument(),
+    );
+    expect(screen.queryByText(/replay-only/i)).not.toBeInTheDocument();
+  });
 });

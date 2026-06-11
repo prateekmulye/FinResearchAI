@@ -1,8 +1,8 @@
 """Shared zero-cost metrics helper.
 
-All analyst nodes and the router return a ``run_metrics`` list of dicts.
-``zero_metrics(node)`` produces the canonical zero-cost entry so router +
-analysts stay in sync without 4-way drift.
+All nodes return a ``run_metrics`` list of dicts. ``zero_metrics(node)``
+produces the canonical zero-cost entry so every node (and the graph stubs)
+emits the same record shape without drift.
 """
 from __future__ import annotations
 

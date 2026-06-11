@@ -143,8 +143,10 @@ function ReplayTheater({ run }: { run: RunDetail }) {
       )}
 
       {/* The transport sits above the cockpit so play/scrub is the first thing
-          the eye lands on, then the graph it drives. */}
-      {player.durationMs > 0 ? (
+          the eye lands on, then the graph it drives. Emptiness keys on the
+          DECODED STEP COUNT, never durationMs: offsets are inter-event gaps,
+          so a single-event run has durationMs 0 yet is absolutely replayable. */}
+      {player.stepCount > 0 ? (
         <TransportBar player={player} />
       ) : (
         <p className="px-1 font-mono text-2xs text-[var(--color-fg-subtle)]">
@@ -152,8 +154,15 @@ function ReplayTheater({ run }: { run: RunDetail }) {
         </p>
       )}
 
-      {/* The cockpit — driven entirely by the replay state. Zero changes. */}
-      <Cockpit state={player.state} modeHint={modeHint} />
+      {/* The cockpit — driven entirely by the replay state. ELAPSED + per-node
+          latencies read the recorded run's own timing at the playhead, never
+          the playback wall clock or the reducer's synthetic fold stamps. */}
+      <Cockpit
+        state={player.state}
+        modeHint={modeHint}
+        replayElapsedMs={player.recordedElapsedMs}
+        replayNodeLatencies={player.recordedNodeLatencies}
+      />
     </div>
   );
 }

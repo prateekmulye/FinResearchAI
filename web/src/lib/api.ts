@@ -187,6 +187,12 @@ export interface EvalResultsResponse {
 
 export interface QuotaStatus {
   metered: boolean;
+  /**
+   * True when the quota system EXISTS but its DB read failed (an outage, not
+   * absence): the backend answers 200 with null counters rather than a 500.
+   * Optional because older payloads omit it (backend default: false).
+   */
+  degraded?: boolean;
   ip_used: number | null;
   ip_limit: number | null;
   global_used: number | null;
@@ -323,20 +329,24 @@ export type QuotaState =
   | { kind: "available"; label: string; remaining: number }
   | { kind: "replay-only"; label: string }
   | { kind: "unmetered"; label: string }
+  | { kind: "degraded"; label: string }
   | { kind: "unknown"; label: string };
 
 /**
  * Derive the human-facing quota pill state from the QuotaStatus DTO.
  *
  * Backend semantics (quota.py): metered=false means there is NO quota system
- * (counters null) — an "unmetered demo", distinct from an outage. When metered,
- * a run consumes BOTH the per-IP and the global budget, so the binding limit is
- * the smaller remaining of the two.
+ * (counters null) — an "unmetered demo", distinct from an outage. degraded=true
+ * means the system exists but its counters are unreadable right now (a DB
+ * outage) — a neutral "quota unavailable", NEVER an exhausted/replay-only
+ * claim. When metered, a run consumes BOTH the per-IP and the global budget,
+ * so the binding limit is the smaller remaining of the two.
  */
 export function deriveQuotaState(q: QuotaStatus | undefined): QuotaState {
   if (!q) return { kind: "unknown", label: "checking quota…" };
   if (q.admin) return { kind: "admin", label: "admin · unlimited" };
   if (!q.metered) return { kind: "unmetered", label: "unmetered demo" };
+  if (q.degraded) return { kind: "degraded", label: "quota unavailable" };
 
   const ipLeft =
     q.ip_limit != null && q.ip_used != null

@@ -1,9 +1,10 @@
 """Rate limiting with an in-memory default and an optional Redis backend seam.
 
-Default is a per-key sliding-window counter held in process memory (fine for a
-single HF Space replica). If REDIS_URL is set AND the `redis` package imports,
-a Redis-backed limiter is used so multiple replicas share one budget. The import
-is guarded: a missing package or bad URL degrades gracefully to in-memory.
+Default is a per-key sliding-window counter held in process memory (fine for
+the single-uvicorn-worker VPS deployment). If REDIS_URL is set AND the `redis`
+package imports, a Redis-backed limiter is used so multiple replicas share one
+budget. The import is guarded: a missing package or bad URL degrades gracefully
+to in-memory.
 """
 from __future__ import annotations
 
@@ -30,13 +31,23 @@ class InMemoryRateLimiter:
     def allow(self, key: str) -> bool:
         now = time.monotonic()
         cutoff = now - self.window_s
+        self._evict(cutoff)
         q = self._hits[key]
-        while q and q[0] < cutoff:
-            q.popleft()
         if len(q) >= self.limit:
             return False
         q.append(now)
         return True
+
+    def _evict(self, cutoff: float) -> None:
+        """Prune expired hits and DELETE fully-expired keys: without eviction the
+        dict accumulates one deque per client IP ever seen, for the process
+        lifetime. O(keys) per call is fine at this limiter's request rates."""
+        for key in [k for k, q in self._hits.items() if not q or q[0] < cutoff]:
+            q = self._hits[key]
+            while q and q[0] < cutoff:
+                q.popleft()
+            if not q:
+                del self._hits[key]
 
 
 class RedisRateLimiter:

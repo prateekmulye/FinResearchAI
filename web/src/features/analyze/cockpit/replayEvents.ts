@@ -28,6 +28,13 @@ export interface ReplayStep {
   event: AnalysisEvent;
   /** Synthetic offset from playback start (ms) at 1x — drives scheduling + scrub. */
   offsetMs: number;
+  /**
+   * Elapsed ms in the ORIGINAL recorded run at this step — cumulative real
+   * `ts_ms` deltas, UNclamped (zero-floored per gap; synthetic fallback when a
+   * record carries no ts). This is what the cockpit's ELAPSED readout shows
+   * during replay: the run's own timing, never the playback wall clock.
+   */
+  recordedOffsetMs: number;
   /** The node id this step touches, if any — used to mark stage ticks. */
   node: string | null;
   /** The wire event name, for tick semantics (node_complete = a stage landed). */
@@ -66,6 +73,7 @@ export function compileReplay(events: readonly ReplayEvent[]): {
 } {
   const steps: ReplayStep[] = [];
   let offset = 0;
+  let recorded = 0;
   let prevTs: number | null = null;
 
   for (const raw of events) {
@@ -76,12 +84,15 @@ export function compileReplay(events: readonly ReplayEvent[]): {
     if (steps.length > 0) {
       const realDelta = ts != null && prevTs != null ? ts - prevTs : MIN_STEP_MS;
       offset += clamp(realDelta, MIN_STEP_MS, MAX_STEP_MS);
+      // The original run's own clock: real deltas, zero-floored so a recorder
+      // ts regression can never run ELAPSED backwards.
+      recorded += Math.max(0, realDelta);
     }
     prevTs = ts;
 
     const node =
       "node" in event && typeof event.node === "string" ? event.node : null;
-    steps.push({ event, offsetMs: offset, node, name: event.type });
+    steps.push({ event, offsetMs: offset, recordedOffsetMs: recorded, node, name: event.type });
   }
 
   return { steps, durationMs: offset };
@@ -89,4 +100,27 @@ export function compileReplay(events: readonly ReplayEvent[]): {
 
 function clamp(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, v));
+}
+
+/**
+ * Per-node latency (SECONDS) from the recorded run's own clock: the
+ * recordedOffsetMs delta between each node's first node_start and its
+ * node_complete. This is what the replay transcript shows — the reducer's
+ * replay-mode lifecycle stamps are synthetic fold ticks, so deriving latency
+ * from them renders nonsense ("1ms" rows).
+ */
+export function recordedNodeLatencies(
+  steps: readonly ReplayStep[],
+): Record<string, number> {
+  const startedAt: Record<string, number> = {};
+  const out: Record<string, number> = {};
+  for (const s of steps) {
+    if (!s.node) continue;
+    if (s.name === "node_start" && !(s.node in startedAt)) {
+      startedAt[s.node] = s.recordedOffsetMs;
+    } else if (s.name === "node_complete" && s.node in startedAt) {
+      out[s.node] = Math.max(0, s.recordedOffsetMs - startedAt[s.node]!) / 1000;
+    }
+  }
+  return out;
 }

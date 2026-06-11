@@ -14,6 +14,7 @@ export type StatusFilter = "all" | RunStatus;
 
 const STATUS_OPTIONS: { value: StatusFilter; label: string }[] = [
   { value: "all", label: "All" },
+  { value: "running", label: "Running" },
   { value: "finished", label: "Finished" },
   { value: "error", label: "Error" },
   { value: "aborted", label: "Aborted" },

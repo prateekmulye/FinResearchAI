@@ -15,11 +15,16 @@ import { formatInt, formatUsd } from "@/lib/utils";
 
 import { costTotals, elapsedSeconds } from "./pipeline";
 
-function announcement(state: AnalysisStreamState): string {
+function announcement(state: AnalysisStreamState, isReplay: boolean): string {
   if (state.phase === "idle") return "";
 
   if (state.phase === "done") {
     const totals = costTotals(state);
+    // REPLAY: node stamps are synthetic fold ticks, so elapsedSeconds would
+    // announce a bogus "0s elapsed" — state the cost summary without it.
+    if (isReplay) {
+      return `Analysis complete — ${formatInt(totals.totalTokens)} tokens, ${formatUsd(totals.costUsd)}`;
+    }
     const elapsed = Math.round(elapsedSeconds(state, Date.now()));
     return `Analysis complete — ${formatInt(totals.totalTokens)} tokens, ${formatUsd(totals.costUsd)}, ${elapsed}s elapsed`;
   }
@@ -36,10 +41,17 @@ function announcement(state: AnalysisStreamState): string {
     : "Analysis started";
 }
 
-export function StatusAnnouncer({ state }: { state: AnalysisStreamState }) {
+export function StatusAnnouncer({
+  state,
+  isReplay = false,
+}: {
+  state: AnalysisStreamState;
+  /** REPLAY: suppress wall-clock claims the synthetic timeline can't back. */
+  isReplay?: boolean;
+}) {
   return (
     <p role="status" className="sr-only">
-      {announcement(state)}
+      {announcement(state, isReplay)}
     </p>
   );
 }

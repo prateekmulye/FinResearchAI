@@ -206,10 +206,18 @@ describe("useAnalysisStream — stream draining without a terminal event", () =>
 });
 
 describe("useAnalysisStream — HTTP error status", () => {
-  function renderHttpError(status: number) {
+  function renderHttpError(status: number, jsonBody?: unknown) {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => ({ ok: false, status, body: null }) as unknown as Response),
+      vi.fn(
+        async () =>
+          ({
+            ok: false,
+            status,
+            body: null,
+            ...(jsonBody !== undefined ? { json: async () => jsonBody } : {}),
+          }) as unknown as Response,
+      ),
     );
     return renderHook(() => useAnalysisStream());
   }
@@ -230,5 +238,37 @@ describe("useAnalysisStream — HTTP error status", () => {
     });
     expect(result.current.state.phase).toBe("error");
     expect(result.current.state.errorStatus).toBe(500);
+  });
+
+  it("surfaces a string `detail` from the error body instead of the bare status", async () => {
+    const { result } = renderHttpError(422, { detail: "ticker is not analyzable" });
+    await act(async () => {
+      await result.current.start({ ticker: "??", investorMode: "Neutral" });
+    });
+    expect(result.current.state.error).toBe("ticker is not analyzable");
+    expect(result.current.state.errorStatus).toBe(422);
+  });
+
+  it("joins FastAPI 422 validation messages ({detail: [{msg…}]})", async () => {
+    const { result } = renderHttpError(422, {
+      detail: [
+        { loc: ["body", "ticker"], msg: "String should have at most 15 characters", type: "string_too_long" },
+        { loc: ["body", "investor_mode"], msg: "Input should be 'Bullish', 'Bearish' or 'Neutral'", type: "enum" },
+      ],
+    });
+    await act(async () => {
+      await result.current.start({ ticker: "WAY-TOO-LONG-TICKER", investorMode: "Neutral" });
+    });
+    expect(result.current.state.error).toBe(
+      "String should have at most 15 characters; Input should be 'Bullish', 'Bearish' or 'Neutral'",
+    );
+  });
+
+  it("falls back to the status code when the error body is not JSON", async () => {
+    const { result } = renderHttpError(503); // mock has no json() at all
+    await act(async () => {
+      await result.current.start({ ticker: "AAPL", investorMode: "Neutral" });
+    });
+    expect(result.current.state.error).toBe("analyze -> 503");
   });
 });

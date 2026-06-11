@@ -15,7 +15,6 @@ from src.warehouse.repos import (
     bulk_upsert_price_bars,
     insert_fundamentals,
     save_eval_result,
-    set_watched,
     upsert_instrument,
     upsert_news,
 )
@@ -27,9 +26,8 @@ def _seed_market(seed) -> None:
     async def _go(session):
         aapl = await upsert_instrument(
             session, ticker="AAPL", exchange="NASDAQ", screener="america",
-            name="Apple Inc.", sector="Technology",
+            name="Apple Inc.", sector="Technology", watched=True,
         )
-        await set_watched(session, aapl.id, True)
         await upsert_instrument(
             session, ticker="MSFT", exchange="NASDAQ", screener="america",
             name="Microsoft Corporation",

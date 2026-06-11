@@ -24,7 +24,7 @@ import {
   type EdgeProps,
 } from "@xyflow/react";
 import "@xyflow/react/dist/base.css";
-import { Check, X } from "lucide-react";
+import { Check, Minus, X } from "lucide-react";
 import { memo, useMemo } from "react";
 
 import { nodeLabel, nodePhase } from "@/features/analyze/nodeLabels";
@@ -65,6 +65,9 @@ function FinNode({ data, id }: NodeProps & { data: FinNodeData }) {
   const running = status === "running";
   const complete = status === "complete";
   const error = status === "error";
+  // A stopped run (abort / terminal phase): dim the node like pending, but
+  // keep its surface so it still reads as "had started" — no motion at all.
+  const halted = status === "halted";
 
   return (
     <div
@@ -86,13 +89,15 @@ function FinNode({ data, id }: NodeProps & { data: FinNodeData }) {
             ? "var(--color-hold)"
             : complete || running
               ? tint
-              : "var(--color-line)"
+              : halted
+                ? "var(--color-line-strong)"
+                : "var(--color-line)"
         }`,
         boxShadow:
           running || complete
             ? `0 0 0 1px ${tint}, 0 0 18px -6px ${tint}`
             : "none",
-        opacity: status === "pending" ? 0.55 : 1,
+        opacity: status === "pending" || halted ? 0.55 : 1,
       }}
     >
       {/* invisible handles keep edges anchored; the graph is non-interactive */}
@@ -115,6 +120,7 @@ function FinNode({ data, id }: NodeProps & { data: FinNodeData }) {
         >
           {complete && <Check className="size-2.5 text-[var(--color-accent-fg)]" strokeWidth={3} />}
           {error && <X className="size-2.5 text-[var(--color-accent-fg)]" strokeWidth={3} />}
+          {halted && <Minus className="size-2.5 text-[var(--color-fg-subtle)]" strokeWidth={3} />}
         </span>
         <span className="truncate text-xs font-medium leading-tight text-[var(--color-fg)]">
           {nodeLabel(id)}

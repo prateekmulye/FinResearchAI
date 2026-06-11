@@ -80,4 +80,21 @@ describe("DecisionReveal", () => {
     );
     expect(container.querySelector("script")).toBeNull();
   });
+
+  it("keeps aria-live off the rAF count-up span; announces only the final score", () => {
+    const { container } = render(<DecisionReveal done={done()} ticker="AAPL" />);
+
+    // The rAF-mutated score span (textContent rewritten ~60fps; the text-4xl
+    // one — the gauge has its own smaller counter) must be hidden from
+    // assistive tech — a live region there announces every intermediate number.
+    const counting = container.querySelector("span.text-4xl")!;
+    expect(counting).not.toBeNull();
+    expect(counting).not.toHaveAttribute("aria-live");
+    expect(counting.closest('[aria-hidden="true"]')).not.toBeNull();
+
+    // The polite announcement is a separate visually-hidden span, set once to
+    // the final value and never mutated afterward.
+    const announced = container.querySelector('.sr-only[aria-live="polite"]');
+    expect(announced).toHaveTextContent("74/100");
+  });
 });

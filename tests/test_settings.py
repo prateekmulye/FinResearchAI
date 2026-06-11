@@ -24,11 +24,13 @@ def test_load_model_tiers_reads_yaml(tmp_path):
 # WP-2 (spec-sanctioned REMOVAL): chroma_dir is gone with the Chroma backend.
 # WP-3 (ADDITIVE): collector_enabled + collector_interval_hours (scheduled collector).
 # WP-5 (ADDITIVE): admin_token + demo daily caps + fake_llm (APP_FAKE_LLM demo mode).
+# WP-14 (sanctioned REMOVAL): llm_provider + langsmith_enabled were dead — nothing
+# read them (the provider is implied by llm_base_url; LangSmith was never wired).
 _CONTRACT_FIELDS = {
-    "llm_provider", "llm_base_url", "ollama_api_key", "firecrawl_api_key",
+    "llm_base_url", "ollama_api_key", "firecrawl_api_key",
     "quick_model", "deep_model", "quick_temperature", "deep_temperature",
     "research_debate_rounds", "risk_debate_rounds", "debate_mode",
-    "embedding_model", "runs_dir", "langsmith_enabled",
+    "embedding_model", "runs_dir",
     "database_url", "db_echo",
     "collector_enabled", "collector_interval_hours",
     "admin_token", "demo_runs_per_ip_per_day", "demo_runs_global_per_day", "fake_llm",
@@ -42,13 +44,14 @@ def test_settings_exposes_all_contract_fields(monkeypatch):
     missing = _CONTRACT_FIELDS - set(type(s).model_fields)
     assert not missing, f"Settings dropped frozen contract fields: {missing}"
     # Spot-check contract defaults that downstream WPs rely on.
-    assert s.llm_provider == "ollama_cloud"
     assert s.debate_mode == "on"
     assert s.embedding_model == "BAAI/bge-small-en-v1.5"
     # WP-2: the Chroma backend (and its chroma_dir setting) is gone.
     assert "chroma_dir" not in type(s).model_fields
+    # WP-14: the dead llm_provider/langsmith_enabled settings are gone.
+    assert "llm_provider" not in type(s).model_fields
+    assert "langsmith_enabled" not in type(s).model_fields
     assert s.runs_dir == "runs"
-    assert s.langsmith_enabled is False
     # WP-1 warehouse fields: disabled by default (no DATABASE_URL -> warehouse off).
     assert s.database_url is None
     assert s.db_echo is False

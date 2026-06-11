@@ -73,7 +73,17 @@ def _ticker_of(text: str) -> str:
     return "DEMO"
 
 
+# Well-known tickers that deterministically read bearish so demos can showcase
+# the SELL path (everything else maps BUY/HOLD from its demo_score).
+_SELL_TICKERS = frozenset({"GME"})
+
+
 def _action_for(ticker: str) -> tuple[str, float, int]:
+    if ticker in _SELL_TICKERS:
+        # Mirror the outlook score into the bearish half of the scale; conviction
+        # is confidence in the SELL call itself, so it mirrors back up.
+        score = 100 - demo_score(ticker)
+        return "SELL", round((100 - score) / 100, 2), score
     score = demo_score(ticker)
     action = "BUY" if score >= 70 else "HOLD"
     return action, round(score / 100, 2), score
@@ -184,13 +194,14 @@ def _debate_turn(schema: type, text: str, ticker: str) -> Any:
 
 def _trade_proposal(schema: type, text: str, ticker: str) -> Any:
     action, conviction, score = _action_for(ticker)
+    view = {"BUY": "bullish", "SELL": "bearish"}.get(action, "balanced")
     return schema(
         action=action,
         conviction=conviction,
         score=score,
         rationale=(
             f"{action} {ticker}: prevailing research view is "
-            f"{'bullish' if score >= 70 else 'balanced'} (outlook {score}/100) on earnings "
+            f"{view} (outlook {score}/100) on earnings "
             "momentum and supportive technicals, sized against the regulatory overhang."
         ),
     )

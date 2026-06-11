@@ -101,11 +101,14 @@ export function TransportBar({ player }: { player: EventPlayerControls }) {
           e.preventDefault();
           toggle();
           break;
+        // ARIA slider pattern: Right/Up increase, Left/Down decrease.
         case "ArrowRight":
+        case "ArrowUp":
           e.preventDefault();
           step(1);
           break;
         case "ArrowLeft":
+        case "ArrowDown":
           e.preventDefault();
           step(-1);
           break;
@@ -124,8 +127,9 @@ export function TransportBar({ player }: { player: EventPlayerControls }) {
 
   // Space toggles play/pause from anywhere on the page (the media convention),
   // unless the user is typing in a field, focused on the slider (which owns
-  // its own handler), or focused on a button — Space must ACTIVATE a focused
-  // button (Restart, speed), not hijack it into a play/pause toggle.
+  // its own handler), or focused on an interactive control — Space must
+  // ACTIVATE a focused button (Restart, speed) or link (Back to library),
+  // not hijack it into a play/pause toggle.
   useEffect(() => {
     const onSpace = (e: KeyboardEvent) => {
       if (e.key !== " ") return;
@@ -134,8 +138,8 @@ export function TransportBar({ player }: { player: EventPlayerControls }) {
       const typing =
         tag === "INPUT" || tag === "TEXTAREA" || t?.isContentEditable;
       const onSlider = t?.getAttribute("role") === "slider";
-      const onButton = Boolean(t?.closest?.("button"));
-      if (typing || onSlider || onButton) return;
+      const onControl = Boolean(t?.closest?.("button, a"));
+      if (typing || onSlider || onControl) return;
       e.preventDefault();
       toggle();
     };

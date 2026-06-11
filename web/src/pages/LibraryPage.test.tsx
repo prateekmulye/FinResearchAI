@@ -173,4 +173,21 @@ describe("LibraryPage", () => {
       await screen.findByText(/live runs exhausted for today/i),
     ).toBeInTheDocument();
   });
+
+  it("accepts the 'running' status filter (backend supports it) and marks its control", async () => {
+    library.mockResolvedValue({ runs: [makeRun({ status: "running" })], total: 1 });
+    renderWithProviders(<LibraryPage />, { route: "/library?status=running" });
+
+    await screen.findByText("AAPL");
+    // The deep link survives validation and reaches the query…
+    expect(library).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "running" }),
+      expect.anything(),
+    );
+    // …and the segmented control reflects it.
+    expect(screen.getByRole("button", { name: "Running" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+  });
 });

@@ -67,6 +67,11 @@ def main() -> None:
 
     os.environ.setdefault("APP_FAKE_LLM", "1")
     os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:////tmp/finr.db")
+    # Lift the daily demo caps for the seeding session (the default 3/day per-IP
+    # cap would 429 every run after the third and silently seed a partial
+    # library). Must be set BEFORE the app import: get_settings() is lru_cached.
+    os.environ.setdefault("DEMO_RUNS_PER_IP_PER_DAY", str(10 * len(RUNS)))
+    os.environ.setdefault("DEMO_RUNS_GLOBAL_PER_DAY", str(10 * len(RUNS)))
 
     # Imported after the env is pinned so settings resolve to the dev values.
     from starlette.testclient import TestClient
@@ -76,7 +81,9 @@ def main() -> None:
     from src.warehouse.db import get_engine
 
     asyncio.run(create_all(get_engine()))
-    app = create_app()
+    # rate_limit lifted too: the default per-hour burst limiter (5) would start
+    # rejecting the moment RUNS outgrows it.
+    app = create_app(rate_limit=10 * len(RUNS))
     with TestClient(app) as client:
         for spec in RUNS:
             with client.stream("POST", "/api/analyze", json=spec) as resp:
@@ -91,6 +98,13 @@ def main() -> None:
             fd = run.get("final_decision") or {}
             print(f"  {run['run_id'][:12]}  {run['ticker']:6s} "
                   f"{run['status']:9s} {fd.get('action', '?')}")
+        if lib["total"] != len(RUNS):
+            print(
+                f"seed_library: FAILED — expected {len(RUNS)} runs in the library, "
+                f"got {lib['total']} (a guard/limiter likely rejected some runs).",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
 
 
 if __name__ == "__main__":

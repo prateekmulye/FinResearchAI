@@ -1,8 +1,3 @@
-# Include any files you want to ignore (do not want to push to GitHub)
-.ipynb_checkpoints
-.DS_Store
-.env
-
 # Byte-compiled / optimized / DLL files
 __pycache__
 *.py[cod]
@@ -128,9 +123,6 @@ venv.bak/
 *.tar
 *.gz
 *.zip
-src/__pycache__/state.cpython-313.pyc
-src/__pycache__/graph.cpython-313.pyc
-src/__pycache__/state.cpython-313.pyc
 
 # RunRecorder trace output
 runs/

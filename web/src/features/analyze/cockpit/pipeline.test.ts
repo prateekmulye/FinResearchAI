@@ -106,6 +106,37 @@ describe("nodeStatuses", () => {
     expect(st["router"]).toBe("complete");
     expect(st["news_analyst"]).toBe("error");
   });
+
+  it("post-abort (phase idle): no node reports running — incomplete nodes halt", () => {
+    // A user Stop lands the reducer back at "idle" with the node map intact.
+    // The cockpit stays mounted, so a started-but-never-completed node must
+    // stop claiming "running" — nothing more can ever arrive for it.
+    const { topology } = resolveTopology(state());
+    const s = withNodes(
+      {
+        router: node("router", { completedAt: 2000 }),
+        news_analyst: node("news_analyst"), // was mid-flight when stopped
+      },
+      { phase: "idle" },
+    );
+    const st = nodeStatuses(s, topology);
+    expect(st["router"]).toBe("complete");
+    expect(st["news_analyst"]).toBe("halted");
+    expect(st["bull"]).toBe("pending"); // never started — stays dim pending
+    expect(Object.values(st)).not.toContain("running");
+  });
+
+  it("phase done: a straggler that never completed halts rather than runs", () => {
+    const { topology } = resolveTopology(state());
+    const s = withNodes(
+      { reporter: node("reporter") },
+      {
+        phase: "done",
+        done: { finalReport: "# r", finalDecision: null, runMetrics: [] },
+      },
+    );
+    expect(nodeStatuses(s, topology)["reporter"]).toBe("halted");
+  });
 });
 
 describe("edgeFlow", () => {

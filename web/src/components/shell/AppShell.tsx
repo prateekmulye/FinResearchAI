@@ -26,7 +26,13 @@ export function AppShell() {
 
       <TopNav />
 
-      <div id="main" className="mx-auto w-full max-w-7xl flex-1 px-4 py-8 sm:py-10">
+      {/* tabIndex={-1}: the skip link's target must be programmatically
+          focusable or the skip is a no-op in several browsers. */}
+      <div
+        id="main"
+        tabIndex={-1}
+        className="mx-auto w-full max-w-7xl flex-1 px-4 py-8 outline-none sm:py-10"
+      >
         <PageTransition>
           <Suspense fallback={<RouteFallback />}>
             <Outlet />

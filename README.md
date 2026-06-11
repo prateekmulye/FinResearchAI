@@ -221,7 +221,7 @@ Everything under `/api`, liveness at the root:
 ```
 src/            the application — graph, agents, llm, tools, api, warehouse, collector, eval, memory, obs
 web/            React SPA (Vite + TS); design tokens in web/DESIGN.md
-tests/          offline unit + integration suites (505 tests; no network)
+tests/          offline unit + integration suites (540 tests; no network)
 migrations/     Alembic schema for the warehouse
 evals/          curated A/B ticker set; eval reports land here
 scripts/        dev utilities (demo seeder, smoke test)
@@ -232,7 +232,7 @@ docs/           deploy runbook, design history (docs/superpowers/), screenshots
 
 ## Testing
 
-745 tests: **505 backend** (pytest, fully offline — LLMs and tools mocked) + **240
+815 tests: **540 backend** (pytest, fully offline — LLMs and tools mocked) + **275
 frontend** (vitest). CI runs five parallel jobs: backend matrix (3.11/3.13), frontend
 gates, real-Postgres integration, security (gitleaks + pip-audit + npm audit), and a
 fake-LLM e2e smoke with a Trivy image scan.

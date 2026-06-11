@@ -182,4 +182,32 @@ describe("deriveQuotaState", () => {
     });
     expect(s).toMatchObject({ kind: "available", remaining: 2 });
   });
+
+  it("degraded outage (200 + degraded:true, null counters) is 'quota unavailable' — never exhausted", () => {
+    const s = deriveQuotaState({
+      metered: true,
+      degraded: true,
+      ip_used: null,
+      ip_limit: null,
+      global_used: null,
+      global_limit: null,
+      admin: false,
+    });
+    expect(s.kind).toBe("degraded");
+    expect(s.label).toBe("quota unavailable");
+    expect(s.kind).not.toBe("replay-only");
+  });
+
+  it("admin still overrides a degraded payload", () => {
+    const s = deriveQuotaState({
+      metered: true,
+      degraded: true,
+      ip_used: null,
+      ip_limit: null,
+      global_used: null,
+      global_limit: null,
+      admin: true,
+    });
+    expect(s.kind).toBe("admin");
+  });
 });

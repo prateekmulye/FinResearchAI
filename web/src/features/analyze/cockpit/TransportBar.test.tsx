@@ -26,6 +26,9 @@ function makePlayer(over: Partial<EventPlayerControls> = {}): EventPlayerControl
     speed: 4,
     elapsedMs: 2000,
     durationMs: 8000,
+    stepCount: 8,
+    recordedElapsedMs: 1500,
+    recordedNodeLatencies: {},
     progress: 0.25,
     stageTicks: [
       { offsetMs: 1000, node: "router" },
@@ -78,6 +81,16 @@ describe("TransportBar", () => {
     expect(step).toHaveBeenCalledWith(-1);
   });
 
+  it("supports ArrowUp/ArrowDown on the slider (ARIA slider pattern)", async () => {
+    const step = vi.fn();
+    render(<TransportBar player={makePlayer({ step })} />);
+    screen.getByRole("slider", { name: /replay timeline/i }).focus();
+    await userEvent.keyboard("{ArrowUp}");
+    expect(step).toHaveBeenLastCalledWith(1);
+    await userEvent.keyboard("{ArrowDown}");
+    expect(step).toHaveBeenLastCalledWith(-1);
+  });
+
   it("does not hijack Space when a button has focus (button activates instead)", async () => {
     const play = vi.fn();
     const pause = vi.fn();
@@ -92,6 +105,21 @@ describe("TransportBar", () => {
     expect(play).not.toHaveBeenCalled();
     expect(pause).not.toHaveBeenCalled();
     expect(setSpeed).toHaveBeenCalledWith(8);
+  });
+
+  it("does not hijack Space when a link has focus (link activates instead)", async () => {
+    const play = vi.fn();
+    const pause = vi.fn();
+    render(
+      <>
+        <a href="/library">Back to library</a>
+        <TransportBar player={makePlayer({ isActive: false, play, pause })} />
+      </>,
+    );
+    screen.getByRole("link", { name: /back to library/i }).focus();
+    await userEvent.keyboard(" ");
+    expect(play).not.toHaveBeenCalled();
+    expect(pause).not.toHaveBeenCalled();
   });
 
   it("renders a stage tick per node_complete with its label", () => {

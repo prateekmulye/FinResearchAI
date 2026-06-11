@@ -21,8 +21,10 @@ import type { Action } from "@/lib/api";
 
 export type DebateTopology = "on" | "off";
 
-/** Visual lifecycle of a single pipeline node. */
-export type NodeStatus = "pending" | "running" | "complete" | "error";
+/** Visual lifecycle of a single pipeline node. `halted` = the run stopped
+ *  (user abort / terminal phase) while this node had started but never
+ *  completed — it must stop claiming "running". */
+export type NodeStatus = "pending" | "running" | "complete" | "error" | "halted";
 
 /** A stage column in the left->right pipeline (drives the canvas grid). */
 export interface StageNode {
@@ -156,11 +158,15 @@ export function resolveTopology(
  * Derive each topology node's visual status from the stream.
  *
  *  - not seen yet                -> pending
- *  - seen, no completedAt        -> running
+ *  - seen, no completedAt        -> running (while the stream is alive)
  *  - completedAt set             -> complete (or error if the run errored on it)
  *
  * When the whole run errors, the node that was still running flips to `error`
- * so the canvas shows *where* it broke rather than a silent freeze.
+ * so the canvas shows *where* it broke rather than a silent freeze. When the
+ * stream is no longer advancing for any other reason (user abort lands the
+ * phase back at "idle"; a terminal "done" with a straggler), a started-but-
+ * never-completed node renders `halted` — nothing may claim "running" once no
+ * more events can arrive.
  */
 export function nodeStatuses(
   state: AnalysisStreamState,
@@ -168,6 +174,7 @@ export function nodeStatuses(
 ): Record<string, NodeStatus> {
   const out: Record<string, NodeStatus> = {};
   const errored = state.phase === "error";
+  const alive = state.phase === "streaming" || state.phase === "connecting";
 
   for (const { id } of topology.nodes) {
     const run = state.nodes[id];
@@ -175,8 +182,10 @@ export function nodeStatuses(
       out[id] = "pending";
     } else if (run.completedAt != null) {
       out[id] = "complete";
+    } else if (errored) {
+      out[id] = "error";
     } else {
-      out[id] = errored ? "error" : "running";
+      out[id] = alive ? "running" : "halted";
     }
   }
   return out;

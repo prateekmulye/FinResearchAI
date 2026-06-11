@@ -55,6 +55,13 @@ def make_structured_llm(outputs: list[Any]):
                 if hasattr(cb, "on_llm_start"):
                     cb.on_llm_start({}, ["<prompt>"], run_id=rid)
             result = queue.pop(0)
+            # A queued Exception simulates an LLM-call failure: fire on_llm_error
+            # (so CostTracker drops the start marker) and raise it to the caller.
+            if isinstance(result, Exception):
+                for cb in callbacks:
+                    if hasattr(cb, "on_llm_error"):
+                        cb.on_llm_error(result, run_id=rid)
+                raise result
             response = SimpleNamespace(
                 llm_output={
                     "token_usage": {"prompt_tokens": 10, "completion_tokens": 5},

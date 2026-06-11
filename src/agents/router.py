@@ -115,8 +115,9 @@ async def router(state: dict) -> dict:
         "run_metrics": per_node,
     }
 
-    # Optional cache short-circuit. If a fresh verdict exists, attach it so
-    # the graph (WP-D's conditional edge) can skip straight to the reporter.
+    # Cache short-circuit: if a fresh verdict exists, attach it and flag
+    # model_plan.cache_hit — build_graph's conditional edge after the router
+    # then routes straight to the reporter, skipping the full pipeline.
     cached = await _get_cached_verdict(resolution.resolved_ticker, max_age_min=60)
     if cached is not None:
         out["final_decision"] = cached.model_dump()

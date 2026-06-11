@@ -53,15 +53,6 @@ export interface AnalysisStreamState {
   errorStatus: number | null;
 }
 
-/**
- * The minimal shape the cockpit reads from any driver (live or replay). Both
- * useAnalysisStream and useEventPlayer satisfy it — see CockpitDriver.
- */
-export interface UseAnalysisStreamLike {
-  state: AnalysisStreamState;
-  isActive: boolean;
-}
-
 export const initialState: AnalysisStreamState = {
   phase: "idle",
   runId: null,

@@ -73,4 +73,19 @@ describe("PairTable", () => {
     render(<PairTable pairs={[pair({ ticker: "DIV", actionsAgree: false })]} />);
     expect(screen.getByTitle(/diverge/i)).toBeInTheDocument();
   });
+
+  it("exposes the agree/diverge judgement as text (the glyph is aria-hidden)", () => {
+    render(
+      <PairTable
+        pairs={[
+          pair({ ticker: "AGR", actionsAgree: true }),
+          pair({ ticker: "DIV", actionsAgree: false }),
+        ]}
+      />,
+    );
+    // A title attribute on an aria-hidden span is not reliably exposed; the
+    // judgement must exist as (visually hidden) text for screen readers.
+    expect(screen.getByText("verdicts agree")).toBeInTheDocument();
+    expect(screen.getByText("verdicts diverge")).toBeInTheDocument();
+  });
 });

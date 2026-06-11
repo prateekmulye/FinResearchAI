@@ -4,8 +4,13 @@
  * paused mid-replay still carries its resolution), a mono metrics strip (score ·
  * cost · tokens · duration · date · source), and the "Run this ticker live" CTA
  * that deep-links to / with the ticker prefilled via router state.
+ *
+ * React.memo'd: the replay theater re-renders ~60fps while the playhead moves,
+ * but this header's props (the fetched run + the fixed duration label) never
+ * change after load — it must not re-render per frame.
  */
 import { Radio } from "lucide-react";
+import { memo } from "react";
 import { Link } from "react-router";
 
 import { buttonVariants } from "@/components/ui/button";
@@ -15,7 +20,7 @@ import { formatInt, formatRelativeTime, formatUsd } from "@/lib/utils";
 
 import { DebateChip, StatusChip } from "./runChips";
 
-export function RunDossier({
+export const RunDossier = memo(function RunDossier({
   run,
   durationLabel,
 }: {
@@ -81,7 +86,7 @@ export function RunDossier({
       </dl>
     </div>
   );
-}
+});
 
 function Stat({
   label,

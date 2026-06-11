@@ -94,6 +94,15 @@ class TestCiWorkflow:
         # Vuln escapes must be explicit --ignore-vuln pins, never a soft job.
         assert "continue-on-error" not in text
 
+    def test_gitleaks_is_sha_pinned(self, jobs: dict) -> None:
+        # gitleaks reads the GITHUB_TOKEN: secret-adjacent third-party actions
+        # are pinned to a full commit SHA (a moving tag could be repointed at
+        # malicious code), with the tag kept as a comment for humans.
+        text = _steps_text(jobs["security"])
+        assert re.search(r"gitleaks/gitleaks-action@[0-9a-f]{40}\b", text), (
+            "pin gitleaks-action to a 40-hex commit SHA, not a tag"
+        )
+
     def test_e2e_smoke_is_fenced_off_prs(self, jobs: dict) -> None:
         cond = jobs["e2e-smoke"]["if"]
         assert "workflow_dispatch" in cond
@@ -126,6 +135,14 @@ class TestCiWorkflow:
         # condition; the file must exist as long as the workflow points at it.
         assert "trivyignores: .trivyignore" in text
         assert (ROOT / ".trivyignore").is_file()
+
+    def test_trivy_scans_both_compose_images(self, jobs: dict) -> None:
+        # The prod stack ships TWO images (app runtime + the Caddy edge); both
+        # must pass the same CRITICAL/HIGH gate.
+        text = _steps_text(jobs["e2e-smoke"])
+        assert "image-ref: finresearch-app:latest" in text
+        assert "image-ref: finresearch-caddy:latest" in text
+        assert text.count("aquasecurity/trivy-action@") >= 2
 
     def test_no_real_api_key_secrets_ever_reach_ci(self, raw: str) -> None:
         # The only secret CI may touch is the ephemeral GITHUB_TOKEN.
@@ -186,6 +203,15 @@ class TestDeployWorkflow:
         assert "git checkout --detach" in text
         assert "docker-compose.prod.yml up -d --build" in text
 
+    def test_ssh_action_is_sha_pinned(self, wf: dict) -> None:
+        # ssh-action receives the VPS private key: secret-adjacent third-party
+        # actions are pinned to a full commit SHA (a moving tag could be
+        # repointed at malicious code), tag kept as a comment for humans.
+        text = _steps_text(wf["jobs"]["deploy"])
+        assert re.search(r"appleboy/ssh-action@[0-9a-f]{40}\b", text), (
+            "pin ssh-action to a 40-hex commit SHA, not a tag"
+        )
+
 
 # ----------------------------------------------------- vuln-escape rot guard
 class TestVulnEscapesCannotRot:
@@ -194,16 +220,12 @@ class TestVulnEscapesCannotRot:
     bumps a pin, the corresponding escape MUST be deleted — this test makes the
     bump PR fail until it is."""
 
-    # advisory id -> the exact vulnerable pin it excuses
-    ESCAPED = {
-        "CVE-2026-26013": 'langchain-core==1.2.5',
-        "CVE-2026-40087": 'langchain-core==1.2.5',
-        "CVE-2026-44843": 'langchain-core==1.2.5',
-        "PYSEC-2026-76": 'langchain-openai==1.1.6',
-        "PYSEC-2026-83": 'langgraph==1.0.4',
-        "CVE-2026-27794": 'langgraph==1.0.4',  # transitive langgraph-checkpoint
-        "CVE-2025-71176": 'pytest==8.4.2',
-    }
+    # advisory id -> the exact vulnerable pin it excuses.
+    # EMPTY since the WP-14 sweep bumped every vulnerable pin (langchain-core
+    # 1.4.4, langchain-openai 1.1.16, langgraph 1.0.10 + langgraph-checkpoint
+    # >=4, pytest 9.0.3) and deleted all ci.yml/--ignore-vuln + .trivyignore
+    # escapes. Any new escape MUST be added here with its vulnerable pin.
+    ESCAPED: dict[str, str] = {}
 
     def test_every_escape_still_excuses_a_live_vulnerable_pin(self) -> None:
         ci = CI_YML.read_text(encoding="utf-8")

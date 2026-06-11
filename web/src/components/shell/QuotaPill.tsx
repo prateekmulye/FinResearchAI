@@ -28,6 +28,8 @@ function presentation(q: QuotaState): {
         tint: "var(--color-fg-muted)",
         ring: "var(--color-line-strong)",
       };
+    // "degraded" (counters unreadable — an outage, not exhaustion) and
+    // "unknown" share the neutral treatment: never amber, never a dead wall.
     default:
       return {
         Icon: ShieldCheck,

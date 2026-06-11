@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, Callable
 
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.warehouse.models import (
@@ -94,12 +94,6 @@ async def upsert_instrument(
         )
     ).scalar_one()
     return row
-
-
-async def set_watched(session: AsyncSession, instrument_id: int, watched: bool) -> None:
-    await session.execute(
-        update(Instrument).where(Instrument.id == instrument_id).values(watched=watched)
-    )
 
 
 async def list_watched(session: AsyncSession) -> list[Instrument]:
@@ -336,15 +330,6 @@ async def finish_run(
     return run
 
 
-async def append_run_event(
-    session: AsyncSession, run_id: str, seq: int, event: dict[str, Any]
-) -> RunEvent:
-    row = RunEvent(run_id=run_id, seq=seq, event=event)
-    session.add(row)
-    await session.flush()
-    return row
-
-
 async def bulk_append_run_events(
     session: AsyncSession, run_id: str, rows: list[dict[str, Any]]
 ) -> int:
@@ -411,32 +396,6 @@ async def count_runs(
     if status is not None:
         stmt = stmt.where(Run.status == status)
     return int((await session.execute(stmt)).scalar_one())
-
-
-async def latest_finished_run(
-    session: AsyncSession, ticker: str, *, within_hours: int | None = None
-) -> Run | None:
-    """Newest successfully finished run for ``ticker`` (backs the WP-2 verdict cache).
-
-    Only ``status == "finished"`` runs qualify (errored runs have ``finished_at``
-    set too but must never win). ``within_hours`` restricts to runs started
-    inside the freshness window.
-    """
-    stmt = (
-        select(Run)
-        .where(
-            Run.ticker == ticker,
-            Run.status == "finished",
-            Run.finished_at.is_not(None),
-        )
-        .order_by(Run.started_at.desc(), Run.run_id.desc())
-        .limit(1)
-    )
-    if within_hours is not None:
-        cutoff = _utcnow() - timedelta(hours=within_hours)
-        stmt = stmt.where(Run.started_at >= cutoff)
-    result = await session.execute(stmt)
-    return result.scalars().first()
 
 
 # ----------------------------------------------------------------- search (WP-9)

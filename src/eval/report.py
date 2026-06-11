@@ -32,8 +32,30 @@ def _round(x: float, n: int = 4) -> float:
     return round(float(x), n)
 
 
-def aggregate(pairs: list[PairedResult], verdicts: dict[str, JudgeVerdict]) -> dict:
-    """Compute paired on-vs-off summary statistics. Deterministic."""
+def _judge_cost_fields(judge_totals: dict | None) -> dict:
+    """Normalize CostTracker.totals() into the summary's judge-cost keys.
+
+    The judge's own LLM spend is part of the eval's true cost (paper critique #3),
+    so it is surfaced explicitly rather than folded into the pipeline deltas."""
+    totals = judge_totals or {}
+    tokens = int(totals.get("prompt_tokens", 0) or 0) + int(
+        totals.get("completion_tokens", 0) or 0
+    )
+    return {
+        "judge_cost_usd": _round(float(totals.get("cost_usd", 0.0) or 0.0), 6),
+        "judge_tokens": tokens,
+    }
+
+
+def aggregate(
+    pairs: list[PairedResult],
+    verdicts: dict[str, JudgeVerdict],
+    judge_totals: dict | None = None,
+) -> dict:
+    """Compute paired on-vs-off summary statistics. Deterministic.
+
+    ``judge_totals`` is the batch judge's CostTracker.totals(); its cost/tokens
+    land in the summary as judge_cost_usd/judge_tokens (zeros when absent)."""
     n = len(pairs)
     if n == 0:
         return {
@@ -47,6 +69,7 @@ def aggregate(pairs: list[PairedResult], verdicts: dict[str, JudgeVerdict]) -> d
             "mean_cost_delta_on_minus_off": 0.0,
             "mean_latency_delta_on_minus_off": 0.0,
             "mean_token_delta_on_minus_off": 0.0,
+            **_judge_cost_fields(judge_totals),
         }
 
     score_deltas = [p.score_on - p.score_off for p in pairs]
@@ -74,6 +97,7 @@ def aggregate(pairs: list[PairedResult], verdicts: dict[str, JudgeVerdict]) -> d
         "mean_cost_delta_on_minus_off": _round(statistics.fmean(cost_deltas), 6),
         "mean_latency_delta_on_minus_off": _round(statistics.fmean(latency_deltas)),
         "mean_token_delta_on_minus_off": _round(statistics.fmean(token_deltas)),
+        **_judge_cost_fields(judge_totals),
     }
 
 
@@ -127,6 +151,10 @@ def render_markdown(
     lines.append(f"| Mean cost delta USD (on - off) | {summary['mean_cost_delta_on_minus_off']} |")
     lines.append(f"| Mean latency delta s (on - off) | {summary['mean_latency_delta_on_minus_off']} |")
     lines.append(f"| Mean token delta (on - off) | {summary['mean_token_delta_on_minus_off']} |")
+    lines.append(
+        f"| Judge cost USD (tokens) | {summary.get('judge_cost_usd', 0.0)} "
+        f"({summary.get('judge_tokens', 0)}) |"
+    )
     lines.append("")
     lines.append("## Per-ticker")
     lines.append("")
@@ -149,9 +177,10 @@ def write_report(
     verdicts: dict[str, JudgeVerdict],
     label: str,
     out_dir: str = "evals",
+    judge_totals: dict | None = None,
 ) -> tuple[Path, Path]:
     """Write report-<label>.md and report-<label>.json. No wall-clock in names."""
-    summary = aggregate(pairs, verdicts)
+    summary = aggregate(pairs, verdicts, judge_totals)
     md = render_markdown(summary, pairs, verdicts, label)
     payload = {
         "label": label,

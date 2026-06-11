@@ -47,6 +47,22 @@ def test_analyze_rejects_bad_enum_fields_with_422():
         )
 
 
+async def test_analyze_response_sets_send_timeout(offline_graph):
+    # send_timeout reaps black-holed clients (TCP peers that stop reading):
+    # without it a dead connection holds the stream task open indefinitely.
+    from types import SimpleNamespace
+
+    from src.api.routes.analyze import analyze
+    from src.api.schemas import AnalyzeRequest
+
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(runs_path="runs")))
+    resp = await analyze(request, req=AnalyzeRequest(ticker="AAPL"))
+    try:
+        assert resp.send_timeout == 60
+    finally:
+        await resp.body_iterator.aclose()  # the generator was never started
+
+
 def test_rate_limit_returns_429_after_cap(offline_graph):
     # cap of 2 requests for the test app
     with TestClient(create_app(rate_limit=2, rate_window_s=3600)) as client:

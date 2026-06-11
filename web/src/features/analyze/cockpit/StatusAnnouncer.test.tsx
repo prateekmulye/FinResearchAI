@@ -94,4 +94,25 @@ describe("StatusAnnouncer", () => {
     expect(status).toHaveTextContent("500 tokens");
     expect(status).toHaveTextContent("$0.0040");
   });
+
+  it("replay: announces done WITHOUT the bogus fold-tick elapsed", () => {
+    // Replay state stamps node lifecycles with synthetic fold ticks; deriving
+    // elapsed from them announced "0s elapsed". In replay the announcement
+    // states the cost summary and stays silent about wall time.
+    const state = makeState({
+      phase: "done",
+      order: ["reporter"],
+      nodes: { reporter: makeNode("reporter", { startedAt: 1, completedAt: 2 }) },
+      done: {
+        finalReport: "# R",
+        finalDecision: null,
+        runMetrics: [{ node: "reporter", total_tokens: 400, cost_usd: 0.003 }],
+      },
+    });
+    render(<StatusAnnouncer state={state} isReplay />);
+    const status = screen.getByRole("status");
+    expect(status).toHaveTextContent(/analysis complete/i);
+    expect(status).toHaveTextContent("400 tokens");
+    expect(status).not.toHaveTextContent(/elapsed/i);
+  });
 });

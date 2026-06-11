@@ -39,6 +39,13 @@ LEGACY_PATHS = [
     "src/memory/reflection.py",
     "tests/test_store.py",
     "tests/test_reflection.py",
+    # WP-14 sweep: Pipfile/Pipfile.lock were the old Pinecone/Tavily stack
+    # (pyproject.toml is the only dependency manifest); the AAPL_report.*
+    # files were stale prototype outputs committed by accident.
+    "Pipfile",
+    "Pipfile.lock",
+    "AAPL_report.json",
+    "AAPL_report.md",
 ]
 
 

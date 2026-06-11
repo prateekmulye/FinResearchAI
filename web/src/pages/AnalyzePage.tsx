@@ -1,5 +1,6 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Sparkles } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useLocation } from "react-router";
 
 import { GlassCard } from "@/components/ui/glass-card";
@@ -29,6 +30,18 @@ export function AnalyzePage() {
     location.state && typeof (location.state as { ticker?: unknown }).ticker === "string"
       ? (location.state as { ticker: string }).ticker
       : undefined;
+
+  // A run consumes quota the moment it starts, and a terminal phase (done,
+  // error — including a 429 refusal) is when the backend's counters have
+  // settled: refetch ["quota"] at both edges so the nav pill never shows a
+  // stale "N runs left" after a run. The useQuota poll alone is 60s behind.
+  const queryClient = useQueryClient();
+  const phase = state.phase;
+  useEffect(() => {
+    if (phase === "connecting" || phase === "done" || phase === "error") {
+      void queryClient.invalidateQueries({ queryKey: ["quota"] });
+    }
+  }, [phase, queryClient]);
 
   const quotaBlocked =
     state.phase === "error" && isQuotaError(state.error, state.errorStatus);

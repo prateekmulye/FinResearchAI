@@ -91,6 +91,25 @@ def test_aggregate_metrics_sums_fields():
     assert agg["node_count"] == 3
 
 
+def test_aggregate_metrics_counts_distinct_node_labels_not_records():
+    """Debate sub-turn records (research_debate/risk_debate) share one label each;
+    'Nodes executed' must count distinct labels, not raw LLM-call records."""
+    metrics = _sample_metrics() + [
+        {"node": "research_debate", "model": "gpt-oss:120b", "prompt_tokens": 10,
+         "completion_tokens": 5, "latency_s": 0.1, "cost_usd": 0.001},
+        {"node": "research_debate", "model": "gpt-oss:120b", "prompt_tokens": 10,
+         "completion_tokens": 5, "latency_s": 0.1, "cost_usd": 0.001},
+        {"node": "risk_debate", "model": "gpt-oss:120b", "prompt_tokens": 10,
+         "completion_tokens": 5, "latency_s": 0.1, "cost_usd": 0.001},
+    ]
+    agg = aggregate_metrics(metrics)
+    # 3 distinct labels in _sample_metrics + research_debate + risk_debate = 5,
+    # even though there are 6 records.
+    assert agg["node_count"] == 5
+    # token/cost sums still cover every record
+    assert agg["prompt_tokens"] == 380
+
+
 def test_aggregate_metrics_handles_empty():
     agg = aggregate_metrics([])
     assert agg["total_tokens"] == 0
@@ -317,6 +336,58 @@ async def test_reporter_reads_debate_mode_from_settings(monkeypatch, fake_payloa
     monkeypatch.setattr(reporter_mod, "get_settings", lambda: _S())
     out = await reporter(_full_state())
     assert "| Debate mode | off |" in out["final_report"]
+
+
+@pytest.mark.asyncio
+async def test_reporter_explicit_debate_mode_overrides_settings(monkeypatch, fake_payload):
+    """build_graph binds the per-run mode into the reporter; an explicit
+    debate_mode kwarg must win over the settings default."""
+    monkeypatch.setattr(reporter_mod, "get_llm", lambda tier: _FakeLLM(fake_payload))
+
+    class _S:
+        debate_mode = "on"
+
+    monkeypatch.setattr(reporter_mod, "get_settings", lambda: _S())
+    out = await reporter(_full_state(), debate_mode="off")
+    assert "| Debate mode | off |" in out["final_report"]
+
+
+@pytest.mark.asyncio
+async def test_reporter_cache_hit_renders_cached_verdict_without_llm(monkeypatch):
+    """On the verdict-cache short-circuit path (router -> reporter) the reporter
+    renders deterministically from final_decision: no LLM call, a 'verdict cache'
+    note in the body, a cache-hit footer row, and its zero-cost metric line."""
+
+    def _llm_must_not_be_called(tier):
+        raise AssertionError("reporter must not call the LLM on a cache hit")
+
+    monkeypatch.setattr(reporter_mod, "get_llm", _llm_must_not_be_called)
+
+    state = {
+        "ticker": "AAPL",
+        "resolved_ticker": "AAPL",
+        "investor_mode": "Neutral",
+        "model_plan": {"analysts": "quick", "cache_hit": True},
+        "final_decision": {"action": "BUY", "conviction": 0.9, "score": 88,
+                           "rationale": "cached: strong momentum"},
+        "run_metrics": [
+            {"node": "router", "model": "gpt-oss:20b", "prompt_tokens": 10,
+             "completion_tokens": 5, "latency_s": 0.2, "cost_usd": 0.0001},
+        ],
+    }
+    out = await reporter(state, debate_mode="on")
+
+    report = out["final_report"]
+    assert "AAPL" in report
+    assert "BUY" in report and "88" in report          # cached decision in the header
+    assert "verdict cache" in report                    # body explains the short-circuit
+    assert "Run Transparency" in report                 # footer still rendered
+    assert "Served from verdict cache | yes" in report  # footer notes the cache hit
+
+    # No LLM call: financial_data degrades to neutral and metrics are zero-cost.
+    assert out["financial_data"]["valuation"] == 50.0
+    assert [m["node"] for m in out["run_metrics"]] == ["reporter"]
+    assert out["run_metrics"][0]["cost_usd"] == 0.0
 
 
 @pytest.mark.asyncio

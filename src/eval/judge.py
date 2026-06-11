@@ -56,9 +56,15 @@ async def judge_decision(
     context: str,
     decision_on: dict,
     decision_off: dict,
+    *,
+    tracker: CostTracker | None = None,
 ) -> JudgeVerdict:
     """Score on-vs-off reasoning quality with the deep model. Returns a JudgeVerdict
-    whose `preferred` is normalized to 'on'/'off'/'tie'."""
+    whose `preferred` is normalized to 'on'/'off'/'tie'.
+
+    ``tracker`` lets the batch runner share one CostTracker across all judge
+    calls so the eval report can surface the judge's own cost honestly; when
+    omitted, a throwaway per-call tracker is used."""
     # Present neutrally: A == debate-on, B == debate-off (judge is not told this).
     user = (
         f"Ticker: {ticker}\n\n"
@@ -68,7 +74,7 @@ async def judge_decision(
         "Return the better-reasoned verdict label (A, B, or tie), whether they "
         "agree on action, your reasoning, and your confidence."
     )
-    tracker = CostTracker("eval_judge")
+    tracker = tracker if tracker is not None else CostTracker("eval_judge")
     llm = get_llm("deep").with_structured_output(_RawJudgeVerdict, method=STRUCT_METHOD)
     raw: _RawJudgeVerdict = await llm.ainvoke(
         [{"role": "system", "content": _SYSTEM}, {"role": "user", "content": user}],

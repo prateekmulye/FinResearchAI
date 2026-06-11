@@ -11,12 +11,14 @@ Topology:
 """
 from __future__ import annotations
 
+import functools
 import importlib
 import importlib.util
 import logging
 
 from langgraph.graph import END, START, StateGraph
 
+from src.agents._metrics import zero_metrics
 from src.config.settings import get_settings
 from src.state import AgentState
 
@@ -25,11 +27,6 @@ _LOG = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
-
-def _metric(node: str) -> list[dict]:
-    return [{"node": node, "model": "", "prompt_tokens": 0, "completion_tokens": 0,
-             "latency_s": 0.0, "cost_usd": 0.0}]
-
 
 def _resolve(module_path: str, attr: str, fallback):
     """Return the real callable from module_path.attr when the module EXISTS on disk
@@ -72,7 +69,7 @@ def _stub_router(state: AgentState) -> dict:
         "screener": "america",
         "exchange": "NASDAQ",
         "model_plan": {"analysts": "quick", "debate": "deep", "verdict": "deep"},
-        "run_metrics": _metric("router"),
+        "run_metrics": zero_metrics("router"),
     }
 
 
@@ -80,24 +77,24 @@ def _stub_analyst(name: str):
     def node(state: AgentState) -> dict:
         return {
             "analyst_reports": {name: {"summary": f"stub {name} report", "confidence": 0.5}},
-            "run_metrics": _metric(f"{name}_analyst"),
+            "run_metrics": zero_metrics(f"{name}_analyst"),
         }
     return node
 
 
 # WP-D stubs (bull/bear/facilitator/synthesis)
 def _stub_bull(state: AgentState) -> dict:
-    return {"research_debate": {"bull_thesis": "stub bull"}, "run_metrics": _metric("bull")}
+    return {"research_debate": {"bull_thesis": "stub bull"}, "run_metrics": zero_metrics("bull")}
 
 
 def _stub_bear(state: AgentState) -> dict:
-    return {"research_debate": {"bear_thesis": "stub bear"}, "run_metrics": _metric("bear")}
+    return {"research_debate": {"bear_thesis": "stub bear"}, "run_metrics": zero_metrics("bear")}
 
 
 def _stub_facilitator(state: AgentState) -> dict:
     return {
         "research_debate": {"facilitator_verdict": "stub lean-neutral"},
-        "run_metrics": _metric("facilitator"),
+        "run_metrics": zero_metrics("facilitator"),
     }
 
 
@@ -105,7 +102,7 @@ def _stub_research_synthesis(state: AgentState) -> dict:
     return {
         "research_debate": {"rounds": [], "bull_thesis": "", "bear_thesis": "",
                             "facilitator_verdict": "stub single-pass verdict"},
-        "run_metrics": _metric("research_synthesis"),
+        "run_metrics": zero_metrics("research_synthesis"),
     }
 
 
@@ -113,16 +110,16 @@ def _stub_research_synthesis(state: AgentState) -> dict:
 def _stub_trader(state: AgentState) -> dict:
     return {
         "trade_proposal": {"action": "HOLD", "conviction": 0.5, "score": 50, "rationale": "stub"},
-        "run_metrics": _metric("trader"),
+        "run_metrics": zero_metrics("trader"),
     }
 
 
 def _stub_risk_conservative(state: AgentState) -> dict:
-    return {"risk_debate": {"conservative": "stub careful"}, "run_metrics": _metric("risk_conservative")}
+    return {"risk_debate": {"conservative": "stub careful"}, "run_metrics": zero_metrics("risk_conservative")}
 
 
 def _stub_risk_aggressive(state: AgentState) -> dict:
-    return {"risk_debate": {"aggressive": "stub bold"}, "run_metrics": _metric("risk_aggressive")}
+    return {"risk_debate": {"aggressive": "stub bold"}, "run_metrics": zero_metrics("risk_aggressive")}
 
 
 def _stub_risk_arbiter(state: AgentState) -> dict:
@@ -134,13 +131,13 @@ def _stub_risk_arbiter(state: AgentState) -> dict:
             "score": proposal.get("score", 50),
             "rationale": "stub arbiter decision",
         },
-        "run_metrics": _metric("risk_arbiter"),
+        "run_metrics": zero_metrics("risk_arbiter"),
     }
 
 
 # WP-F stub
-def _stub_reporter(state: AgentState) -> dict:
-    return {"final_report": "# Stub Report\n\nReplace in WP-F.", "run_metrics": _metric("reporter")}
+def _stub_reporter(state: AgentState, *, debate_mode: str | None = None) -> dict:
+    return {"final_report": "# Stub Report\n\nReplace in WP-F.", "run_metrics": zero_metrics("reporter")}
 
 
 # ---------------------------------------------------------------------------
@@ -203,6 +200,17 @@ def _analyst_node(name: str):
 # build_graph — the public interface (WP-D owns this).
 # ---------------------------------------------------------------------------
 
+def _route_after_router(state: AgentState) -> str | list[str]:
+    """Conditional edge after the router: verdict-cache short-circuit.
+
+    When the router attached a fresh cached verdict (model_plan.cache_hit), the
+    full pipeline is skipped and the reporter renders straight from the cached
+    final_decision. Otherwise: the normal parallel analyst fan-out."""
+    if (state.get("model_plan") or {}).get("cache_hit"):
+        return "reporter"
+    return [f"{name}_analyst" for name in _ANALYST_NAMES]
+
+
 def build_graph(debate_mode: str | None = None):
     """Compile the research pipeline.
 
@@ -212,6 +220,11 @@ def build_graph(debate_mode: str | None = None):
                           -> trader -> risk -> arbiter -> reporter  (12 nodes, 12 run_metrics).
         "off"          -> single-pass baseline: router -> analysts -> research_synthesis
                           -> trader -> risk -> arbiter -> reporter  (10 nodes, 10 run_metrics).
+
+    A conditional edge after the router short-circuits BOTH topologies to the
+    reporter when a fresh cached verdict exists (node counts above describe
+    non-cached runs). The resolved debate_mode is bound into the reporter so the
+    report footer states the mode this graph actually ran, not the settings default.
 
     Guarded imports ensure each WP's real callable is used when merged and the
     inline stub fallback is used otherwise — no graph.py edits needed when later WPs land.
@@ -229,12 +242,18 @@ def build_graph(debate_mode: str | None = None):
     g.add_node("risk_conservative", risk_conservative)
     g.add_node("risk_aggressive", risk_aggressive)
     g.add_node("risk_arbiter", risk_arbiter)
-    g.add_node("reporter", reporter)
+    # Bind the per-run mode into the reporter so its footer can't drift from
+    # the topology actually compiled (settings.debate_mode is only a default).
+    g.add_node("reporter", functools.partial(reporter, debate_mode=debate_mode))
 
-    # Edges: start -> router -> 3 analysts (parallel fan-out)
+    # Edges: start -> router -> 3 analysts (parallel fan-out), unless a fresh
+    # cached verdict short-circuits the run straight to the reporter.
     g.add_edge(START, "router")
-    for name in _ANALYST_NAMES:
-        g.add_edge("router", f"{name}_analyst")
+    g.add_conditional_edges(
+        "router",
+        _route_after_router,
+        [f"{name}_analyst" for name in _ANALYST_NAMES] + ["reporter"],
+    )
 
     if debate_mode == "off":
         # Single-pass baseline: analysts -> research_synthesis -> trader

@@ -28,7 +28,13 @@ import { useQuota } from "@/hooks/useQuota";
 import { api, type RunStatus } from "@/lib/api";
 
 const PAGE_SIZE = 10;
-const VALID_STATUS: StatusFilter[] = ["all", "finished", "error", "aborted"];
+const VALID_STATUS: StatusFilter[] = [
+  "all",
+  "running",
+  "finished",
+  "error",
+  "aborted",
+];
 
 export function LibraryPage() {
   const [params, setParams] = useSearchParams();

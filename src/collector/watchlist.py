@@ -73,6 +73,9 @@ SEED_WATCHLIST: tuple[SeedInstrument, ...] = (
 async def seed_watchlist() -> int:
     """Idempotently upsert every seed instrument with ``watched=True``.
 
+    Every restart re-asserts ``watched=True`` on the seed set — by design: a
+    manually un-watched seed instrument is re-watched on the next boot.
+
     Returns the number of seeded instruments; 0 when the warehouse is disabled
     or on any DB error (logged) — never raises, safe to call at app startup.
     """

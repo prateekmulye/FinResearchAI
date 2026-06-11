@@ -15,7 +15,6 @@ from src.warehouse.db import enable_sqlite_fks
 from src.warehouse.models import Instrument, NewsItem, PriceBar
 from src.warehouse.repos import (
     _dialect_insert,
-    append_run_event,
     bulk_append_run_events,
     bulk_upsert_price_bars,
     count_runs,
@@ -27,7 +26,6 @@ from src.warehouse.repos import (
     increment_quota,
     insert_fundamentals,
     insert_verdict,
-    latest_finished_run,
     latest_fundamentals,
     latest_verdict,
     list_eval_results,
@@ -38,7 +36,6 @@ from src.warehouse.repos import (
     resolve_instrument,
     save_eval_result,
     search_instruments,
-    set_watched,
     upsert_instrument,
     upsert_news,
 )
@@ -105,15 +102,21 @@ def test_dialect_insert_unbound_session_raises():
         _dialect_insert(AsyncSession())
 
 
-async def test_set_watched_and_list_watched(session):
-    aapl = await upsert_instrument(session, ticker="AAPL", exchange="NASDAQ", screener="america")
+async def test_watched_flag_upsert_and_list_watched(session):
+    # The watched flag is written through upsert_instrument (seed_watchlist's
+    # path); list_watched reads it back for the collector sweep.
+    await upsert_instrument(session, ticker="AAPL", exchange="NASDAQ", screener="america")
     await upsert_instrument(session, ticker="MSFT", exchange="NASDAQ", screener="america")
 
     assert await list_watched(session) == []
-    await set_watched(session, aapl.id, True)
+    await upsert_instrument(
+        session, ticker="AAPL", exchange="NASDAQ", screener="america", watched=True
+    )
     watched = await list_watched(session)
     assert [i.ticker for i in watched] == ["AAPL"]
-    await set_watched(session, aapl.id, False)
+    await upsert_instrument(
+        session, ticker="AAPL", exchange="NASDAQ", screener="america", watched=False
+    )
     assert await list_watched(session) == []
 
 
@@ -200,8 +203,13 @@ async def test_run_lifecycle_create_events_finish_get_list(session):
     run = await create_run(session, "r1", "AAPL", "on")
     assert run.status == "running" and run.finished_at is None
 
-    await append_run_event(session, "r1", 0, {"type": "start"})
-    await append_run_event(session, "r1", 1, {"type": "node_complete", "node": "router"})
+    await bulk_append_run_events(
+        session, "r1",
+        [
+            {"seq": 0, "event": {"type": "start"}},
+            {"seq": 1, "event": {"type": "node_complete", "node": "router"}},
+        ],
+    )
 
     finished = await finish_run(
         session, "r1", status="finished",
@@ -272,57 +280,6 @@ async def test_bulk_append_run_events_empty_returns_zero(session):
     await create_run(session, "r1", "AAPL", "on")
     assert await bulk_append_run_events(session, "r1", []) == 0
     assert await get_run_events(session, "r1") == []
-
-
-async def test_latest_finished_run_respects_within_hours(session):
-    now = datetime.now(UTC)
-
-    old = await create_run(session, "old", "TSLA", "on")
-    await finish_run(session, "old", status="finished")
-    old.started_at = now - timedelta(hours=48)
-    await session.flush()
-
-    fresh = await create_run(session, "fresh", "AAPL", "on")
-    await finish_run(session, "fresh", status="finished")
-    fresh.started_at = now - timedelta(minutes=5)
-    await session.flush()
-
-    await create_run(session, "still-running", "AAPL", "on")  # never finished
-
-    # A newer run that finished with status="error" must NOT win.
-    errored = await create_run(session, "errored", "AAPL", "on")
-    await finish_run(session, "errored", status="error")
-    errored.started_at = now - timedelta(minutes=1)
-    await session.flush()
-    assert errored.finished_at is not None  # finished, but not status="finished"
-
-    # No window: newest *successfully* finished run per ticker.
-    got = await latest_finished_run(session, "AAPL")
-    assert got is not None and got.run_id == "fresh"
-    got = await latest_finished_run(session, "TSLA")
-    assert got is not None and got.run_id == "old"
-
-    # Window: the 48h-old TSLA run is outside 24h but inside 72h.
-    assert await latest_finished_run(session, "TSLA", within_hours=24) is None
-    got = await latest_finished_run(session, "TSLA", within_hours=72)
-    assert got is not None and got.run_id == "old"
-
-    # Unfinished runs never count.
-    assert await latest_finished_run(session, "NVDA") is None
-
-
-async def test_latest_finished_run_tie_breaks_on_run_id(session):
-    t = datetime.now(UTC) - timedelta(minutes=10)
-    a = await create_run(session, "a", "IBM", "on")
-    await finish_run(session, "a", status="finished")
-    b = await create_run(session, "b", "IBM", "on")
-    await finish_run(session, "b", status="finished")
-    a.started_at = t
-    b.started_at = t  # identical started_at -> run_id.desc() decides
-    await session.flush()
-
-    got = await latest_finished_run(session, "IBM")
-    assert got is not None and got.run_id == "b"
 
 
 # ----------------------------------------------------------------------- quota
@@ -402,10 +359,8 @@ async def test_latest_verdict_is_per_ticker(session):
 async def _seed_instrument(session, ticker, exchange, name=None, watched=False):
     inst = await upsert_instrument(
         session, ticker=ticker, exchange=exchange, screener="america",
-        **({"name": name} if name else {}),
+        **({"name": name} if name else {}), **({"watched": True} if watched else {}),
     )
-    if watched:
-        await set_watched(session, inst.id, True)
     return inst
 
 

@@ -33,7 +33,7 @@ old Pinecone/RAG prototype). Paste-ready; tweak freely.
 
 ## Suggested metrics line
 
-> 12-node agent graph · 505 backend + 240 frontend tests · debate A/B eval harness ·
+> 12-node agent graph · 540 backend + 275 frontend tests · debate A/B eval harness ·
 > Postgres + pgvector warehouse · React 19 · 100% open-weight models
 
 ## Links

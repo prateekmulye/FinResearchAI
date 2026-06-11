@@ -34,7 +34,11 @@ import {
 import type { UseAnalysisStream } from "@/hooks/useAnalysisStream";
 import type { ReplayEvent } from "@/lib/api";
 
-import { compileReplay, type ReplayStep } from "./replayEvents";
+import {
+  compileReplay,
+  recordedNodeLatencies,
+  type ReplayStep,
+} from "./replayEvents";
 
 /** Speeds the transport offers (Hick's Law: a small, tappable set). */
 export const REPLAY_SPEEDS = [1, 2, 4, 8] as const;
@@ -60,6 +64,25 @@ export interface EventPlayerControls {
   /** Current playhead time (ms) and total duration (ms), synthetic 1x scale. */
   elapsedMs: number;
   durationMs: number;
+  /**
+   * How many decoded steps the timeline holds. THE emptiness signal: a
+   * single-event run has stepCount 1 but durationMs 0 (offsets are gaps), so
+   * "is there anything to replay?" must never key on durationMs.
+   */
+  stepCount: number;
+  /**
+   * Elapsed ms in the ORIGINAL recorded run at the playhead (the recorded
+   * ts_ms delta of the last due event). The cockpit's ELAPSED readout shows
+   * this during replay — the run's own timing, never the playback wall clock
+   * (replay state stamps are synthetic fold ticks; subtracting them from
+   * Date.now() renders raw epoch seconds).
+   */
+  recordedElapsedMs: number;
+  /**
+   * Per-node latency (s) from the recorded run's own ts_ms deltas, for the
+   * transcript — replay state stamps are synthetic and must not be subtracted.
+   */
+  recordedNodeLatencies: Record<string, number>;
   /** 0..1 progress, for the scrubber fill. */
   progress: number;
   /** Stage ticks (node_complete offsets) for the pipeline-mapped scrubber. */
@@ -117,6 +140,11 @@ export function useEventPlayer(events: readonly ReplayEvent[]): EventPlayerContr
 
   // Derived render state — a pure fold of the due steps (re-runs per event).
   const state = useMemo(() => reduceFirstN(steps, dueCount), [steps, dueCount]);
+
+  // The original run's elapsed at the playhead — advances stepwise as recorded
+  // events land (same collision-driven cadence as the cost ticker's totals).
+  const recordedElapsedMs =
+    dueCount > 0 ? steps[dueCount - 1]!.recordedOffsetMs : 0;
 
   const rafRef = useRef<number | null>(null);
   const lastTsRef = useRef<number | null>(null);
@@ -240,6 +268,9 @@ export function useEventPlayer(events: readonly ReplayEvent[]): EventPlayerContr
     [steps],
   );
 
+  // Stable identity per timeline — Cockpit is memo'd against this prop.
+  const nodeLatencies = useMemo(() => recordedNodeLatencies(steps), [steps]);
+
   const isEnded = durationMs > 0 && timeMs >= durationMs;
 
   return {
@@ -256,6 +287,9 @@ export function useEventPlayer(events: readonly ReplayEvent[]): EventPlayerContr
     speed,
     elapsedMs: timeMs,
     durationMs,
+    stepCount: steps.length,
+    recordedElapsedMs,
+    recordedNodeLatencies: nodeLatencies,
     progress: durationMs > 0 ? timeMs / durationMs : 0,
     stageTicks,
   };

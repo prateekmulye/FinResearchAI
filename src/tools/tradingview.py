@@ -1,6 +1,8 @@
 """tradingview-ta wrapper (tradingview-ta==3.3.0).
 
 fetch_technicals(ticker, screener, exchange) -> Technicals.
+Accepts yfinance-style tickers (RELIANCE.NS, 7203.T, 0700.HK) and owns the
+symbol munging to the EXCHANGE:SYMBOL form tradingview_ta expects.
 Uses TA_Handler(...).get_analysis(); reads .summary + .indicators.
 Keeps an exchange-fallback retry with exponential backoff (mitigates the
 rate-limit / wrong-exchange risk noted in the design spec §8.4), then ToolError.
@@ -21,6 +23,26 @@ _FALLBACKS: dict[str, list[str]] = {
 }
 _MAX_ATTEMPTS = 3
 _BACKOFF_BASE = 0.5  # seconds; monkeypatched to 0.0 in unit tests
+
+# yfinance-style exchange suffixes the router emits (resolved_ticker), which
+# tradingview_ta does NOT understand: its handler wants EXCHANGE:SYMBOL with a
+# bare symbol (e.g. NSE:RELIANCE, not RELIANCE.NS).
+_YF_SUFFIXES = (".NS", ".BO", ".T", ".SS", ".SZ", ".HK")
+
+
+def _ta_symbol(ticker: str) -> str:
+    """Map a yfinance-style ticker to the bare symbol TA_Handler expects.
+
+    Strips the exchange suffix; HKEX symbols additionally drop leading zeros
+    (yfinance 0700.HK -> TradingView HKEX:700). US tickers pass through."""
+    upper = ticker.upper()
+    for suffix in _YF_SUFFIXES:
+        if upper.endswith(suffix):
+            base = ticker[: -len(suffix)]
+            if suffix == ".HK":
+                base = base.lstrip("0") or "0"
+            return base
+    return ticker
 
 
 @dataclass
@@ -68,10 +90,11 @@ def fetch_technicals(ticker: str, screener: str, exchange: str) -> Technicals:
 
         return fake_technicals(ticker, screener, exchange)
     candidates = _candidate_exchanges(screener, exchange)
+    symbol = _ta_symbol(ticker)
     last_exc: Exception | None = None
     for attempt, ex in enumerate(candidates):
         try:
-            analysis = _analyze(symbol=ticker, screener=screener, exchange=ex)
+            analysis = _analyze(symbol=symbol, screener=screener, exchange=ex)
         except Exception as exc:  # rate limit / wrong exchange / network
             last_exc = exc
             # Back off only between retries; skip sleep after the last candidate.

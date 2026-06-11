@@ -14,7 +14,7 @@ import {
   reducer,
   type AnalysisStreamState,
 } from "@/hooks/analysisReducer";
-import { ApiError, type DebateMode, type InvestorMode } from "@/lib/api";
+import { type DebateMode, type InvestorMode } from "@/lib/api";
 import {
   SseFrameParser,
   decodeEvent,
@@ -35,6 +35,28 @@ export interface StartAnalysisParams {
   ticker: string;
   investorMode: InvestorMode;
   debateMode?: DebateMode;
+}
+
+/**
+ * Pull a human-readable message out of a FastAPI error body. Handles both
+ * `{detail: "msg"}` and the 422 validation shape `{detail: [{msg, …}, …]}` so
+ * a refused ticker surfaces the backend's actual reason, not "analyze -> 422".
+ */
+function detailMessage(body: unknown): string | null {
+  if (!body || typeof body !== "object") return null;
+  const detail = (body as { detail?: unknown }).detail;
+  if (typeof detail === "string" && detail.trim() !== "") return detail;
+  if (Array.isArray(detail)) {
+    const msgs = detail
+      .map((d) =>
+        d && typeof d === "object" && typeof (d as { msg?: unknown }).msg === "string"
+          ? (d as { msg: string }).msg
+          : null,
+      )
+      .filter((m): m is string => m != null && m.trim() !== "");
+    if (msgs.length > 0) return msgs.join("; ");
+  }
+  return null;
 }
 
 export interface UseAnalysisStream {
@@ -108,9 +130,17 @@ export function useAnalysisStream(): UseAnalysisStream {
         return;
       }
       if (!res.ok || !res.body) {
+        // Read the JSON error body (e.g. a 422's validation detail) so the
+        // user sees the backend's reason instead of a bare status code.
+        let body: unknown;
+        try {
+          body = await res.json();
+        } catch {
+          body = undefined;
+        }
         dispatch({
           kind: "error",
-          message: new ApiError(`analyze -> ${res.status}`, res.status).message,
+          message: detailMessage(body) ?? `analyze -> ${res.status}`,
           status: res.status,
         });
         return;

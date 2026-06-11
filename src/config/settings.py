@@ -25,8 +25,8 @@ class Settings(BaseSettings):
         env_file=".env", env_file_encoding="utf-8", extra="ignore", case_sensitive=False
     )
 
-    # LLM provider (Ollama Cloud by default; swappable)
-    llm_provider: str = "ollama_cloud"
+    # LLM provider (Ollama Cloud's OpenAI-compatible /v1 by default; swappable
+    # by pointing llm_base_url elsewhere)
     llm_base_url: str = "https://ollama.com/v1"
     ollama_api_key: str = ""
 
@@ -49,7 +49,6 @@ class Settings(BaseSettings):
 
     # Observability
     runs_dir: str = "runs"
-    langsmith_enabled: bool = False
 
     # Warehouse (WP-1, additive): Postgres+pgvector via SQLAlchemy async.
     # Unset DATABASE_URL means the warehouse subsystem is disabled (guarded opt-in).

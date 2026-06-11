@@ -1,18 +1,10 @@
-# WP-12 trivy escapes (audited 2026-06-10). Both are advisories in the
-# exact-pinned langchain-core 1.2.5 with upstream fixes available. Bumping the
-# LLM framework pins is a coordinated dependency-finalization change (the
-# frozen WP-I contract), not a CI patch — Dependabot (.github/dependabot.yml)
-# files those bump PRs weekly. REMOVE each entry when the bump lands.
-# Most IDs are mirrored as --ignore-vuln escapes in ci.yml; CVE-2026-34070 is
-# deliberately NOT mirrored (absent from the PyPI advisory feed pip-audit reads).
-
-# langchain-core 1.2.5 -> fixed in 1.2.22. Path traversal in the LEGACY
-# load_prompt() helpers — FinResearchAI never loads prompts from disk paths
-# (all prompts are inline string constants in src/agents/*).
-CVE-2026-34070
-
-# langchain-core 1.2.5 -> fixed in 1.3.3. Unsafe deserialization via an overly
-# broad load()/loads() allowlist — FinResearchAI never deserializes LangChain
-# payloads (no load()/loads() callers; structured output goes through Pydantic
-# schemas in src/llm/schemas.py).
-CVE-2026-44843
+# Trivy escapes for the e2e-smoke image scan (ci.yml points here, so the file
+# must exist even when empty — tests/test_ci_artifacts.py asserts that).
+#
+# Currently ZERO escapes: the WP-14 sweep bumped langchain-core to 1.4.4,
+# clearing CVE-2026-34070 (fixed 1.2.22) and CVE-2026-44843 (fixed 1.3.3).
+#
+# Any future entry must carry a justification + an explicit removal condition,
+# and (when the advisory also appears in the PyPI feed) be mirrored as a
+# pip-audit --ignore-vuln escape in ci.yml plus an entry in the
+# TestVulnEscapesCannotRot.ESCAPED map so it cannot rot.

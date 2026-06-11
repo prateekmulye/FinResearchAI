@@ -209,6 +209,30 @@ describe("useEventPlayer", () => {
     ]);
   });
 
+  it("recordedElapsedMs tracks the ORIGINAL run's timing at the playhead", () => {
+    // The replay elapsed bug: mid-replay the cockpit showed raw epoch seconds
+    // because state stamps are synthetic fold ticks. The player must expose the
+    // recorded run's own elapsed (ts_ms deltas) at the playhead instead.
+    const { result } = renderHook(() => useEventPlayer(fixtureEvents));
+    const { steps } = compileReplay(fixtureEvents);
+    act(() => result.current.pause());
+
+    // Park just after router completes — recorded ts 1020 vs first ts 1000.
+    const routerComplete = steps.find(
+      (s) => s.name === "node_complete" && s.node === "router",
+    )!;
+    act(() => result.current.seek(routerComplete.offsetMs));
+    expect(result.current.recordedElapsedMs).toBe(20);
+
+    // At the end of the timeline: the whole recorded run took 60ms.
+    act(() => result.current.seek(result.current.durationMs));
+    expect(result.current.recordedElapsedMs).toBe(60);
+
+    // Back at the start: only the first event is due — zero elapsed.
+    act(() => result.current.seek(0));
+    expect(result.current.recordedElapsedMs).toBe(0);
+  });
+
   it("handles an empty timeline without scheduling a loop", () => {
     const { result } = renderHook(() => useEventPlayer([]));
     expect(result.current.durationMs).toBe(0);

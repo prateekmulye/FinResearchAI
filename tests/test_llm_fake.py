@@ -135,6 +135,18 @@ async def test_final_decision_is_valid_and_plausible():
     assert "AAPL" in fd.rationale
 
 
+async def test_demo_sell_ticker_maps_to_sell_and_aapl_stays_buy():
+    """At least one well-known demo ticker deterministically shows the SELL path;
+    the canonical demo ticker AAPL stays a confident BUY (86)."""
+    sell = await _ask(FinalDecision, ARBITER_SYSTEM, "Ticker: GME")
+    assert sell.action == "SELL"
+    assert sell.score < 50          # outlook score reads bearish
+    assert sell.conviction >= 0.5   # but the SELL call itself is confident
+
+    buy = await _ask(FinalDecision, ARBITER_SYSTEM, "Ticker: AAPL")
+    assert (buy.action, buy.score) == ("BUY", 86)
+
+
 async def test_report_payload_has_sections_and_radar():
     payload = await _ask(ReportPayload, REPORTER_SYSTEM_PROMPT, "Ticker: AAPL")
     assert payload.sections and all(s.heading and s.body for s in payload.sections)

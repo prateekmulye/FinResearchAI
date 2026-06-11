@@ -117,6 +117,50 @@ async def test_run_debate_rounds_capped_at_max_rounds(fake_llm_factory, caplog):
 
 
 @pytest.mark.asyncio
+async def test_run_debate_llm_failure_ends_debate_early_with_partial_turns(fake_llm_factory, caplog):
+    """An exception on turn N ends the debate with the N-1 turns accumulated so far;
+    run_debate NEVER raises into its caller (the single-failure degrade contract)."""
+    import logging
+
+    scripted = [
+        DebateTurn(role="bull", round=1, argument="b1"),
+        DebateTurn(role="bear", round=1, argument="r1"),
+        RuntimeError("model offline"),  # bull's round-2 call explodes
+        DebateTurn(role="bear", round=2, argument="never reached"),
+    ]
+    fake_llm_factory(scripted, ["src.agents.debate"])
+    from src.agents.debate import run_debate
+
+    personas = [("bull", "p1"), ("bear", "p2")]
+    with caplog.at_level(logging.WARNING, logger="src.agents.debate"):
+        turns, metrics = await run_debate(
+            "AAPL", "ctx", personas, rounds=2, node_label="research_debate"
+        )
+
+    # Turns before the failure survive; the debate stops at the failed turn.
+    assert [t.argument for t in turns] == ["b1", "r1"]
+    # Only the successful calls have cost records.
+    assert len(metrics) == 2
+    # The failure is logged with the traceback (exc_info) for diagnosis.
+    failures = [r for r in caplog.records if "turn failed" in r.getMessage()]
+    assert failures, "expected a turn-failure degrade warning"
+    assert failures[0].exc_info is not None
+
+
+@pytest.mark.asyncio
+async def test_run_debate_first_turn_failure_returns_empty_debate(fake_llm_factory):
+    """Even a failure on the very first turn degrades to an empty debate, no raise."""
+    fake_llm_factory([ConnectionError("LLM unreachable")], ["src.agents.debate"])
+    from src.agents.debate import run_debate
+
+    turns, metrics = await run_debate(
+        "AAPL", "ctx", [("bull", "p1"), ("bear", "p2")], rounds=1, node_label="risk_debate"
+    )
+    assert turns == []
+    assert metrics == []
+
+
+@pytest.mark.asyncio
 async def test_run_debate_none_turn_skipped(fake_llm_factory):
     """If a turn returns None (weak model / parse failure) it is skipped. F1."""
     # Provide one real turn and one None; only the real turn should be in results.

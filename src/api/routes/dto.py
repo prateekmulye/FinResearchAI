@@ -198,9 +198,12 @@ class EvalResultsResponse(BaseModel):
 class QuotaStatus(BaseModel):
     """``metered=False`` means there is no quota system at all (warehouse
     disabled) — distinct from a quota outage — and the counter fields are null.
-    ``admin`` is computed either way."""
+    ``degraded=True`` means the quota system exists but its DB read failed
+    (``metered=True`` with null counters — the guard fails open on the same
+    condition). ``admin`` is computed in every case."""
 
     metered: bool
+    degraded: bool = False
     ip_used: int | None = None
     ip_limit: int | None = None
     global_used: int | None = None

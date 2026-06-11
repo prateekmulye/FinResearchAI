@@ -8,8 +8,17 @@
  *
  * xyflow + the markdown renderer (marked/dompurify) only load with this module,
  * which is itself reachable only from the lazy Analyze route chunk.
+ *
+ * PERF — two memo layers, both load-bearing:
+ *   1. The component itself is React.memo'd: the replay theater re-renders its
+ *      page ~60fps while the rAF playhead advances, but between recorded events
+ *      every Cockpit prop is identity-stable, so the whole tree skips.
+ *   2. `statuses` identity is pinned to a per-node lifecycle fingerprint: a
+ *      token event produces a new `state` object (so the Cockpit body re-runs)
+ *      but an identical fingerprint, so PipelineCanvas's React.memo holds and
+ *      the canvas never re-renders on token storms.
  */
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 
 import { LiveFeed } from "@/features/analyze/LiveFeed";
 import type { AnalysisStreamState } from "@/hooks/useAnalysisStream";
@@ -31,9 +40,11 @@ import {
   tradePanel,
 } from "./pipeline";
 
-export function Cockpit({
+export const Cockpit = memo(function Cockpit({
   state,
   modeHint = null,
+  replayElapsedMs = null,
+  replayNodeLatencies = null,
 }: {
   state: AnalysisStreamState;
   /**
@@ -42,14 +53,32 @@ export function Cockpit({
    * is inferred from the wire. See resolveTopology.
    */
   modeHint?: DebateTopology | null;
+  /**
+   * REPLAY only: the original run's recorded elapsed ms at the playhead
+   * (useEventPlayer.recordedElapsedMs), forwarded to the cost ticker so
+   * ELAPSED reflects the recorded timeline, never the playback wall clock.
+   */
+  replayElapsedMs?: number | null;
+  /**
+   * REPLAY only: per-node latency (s) from the recorded run's own ts_ms deltas
+   * (useEventPlayer.recordedNodeLatencies). The transcript reads these instead
+   * of the reducer's synthetic fold-tick stamps (which render "1ms" rows).
+   */
+  replayNodeLatencies?: Record<string, number> | null;
 }) {
+  const isReplay = replayElapsedMs != null;
   const { topology, mode } = useMemo(
     () => resolveTopology(state, modeHint),
     [state, modeHint],
   );
-  // Memoized so PipelineCanvas (React.memo) skips re-rendering — and its
-  // internal node/edge useMemos hold — whenever neither input changed.
-  const statuses = useMemo(() => nodeStatuses(state, topology), [state, topology]);
+  // `statuses` must keep a STABLE IDENTITY across token-only state changes so
+  // PipelineCanvas (React.memo) — and its internal node/edge useMemos — skip.
+  // nodeStatuses is cheap (≤12 nodes), so we recompute it per render and pin
+  // the returned identity to a fingerprint of the per-node lifecycle values.
+  const fresh = nodeStatuses(state, topology);
+  const fingerprint = topology.nodes.map((n) => fresh[n.id]).join("|");
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- the fingerprint captures every value of `fresh`; an identical fingerprint MUST return the previous object identity (that is the point).
+  const statuses = useMemo(() => fresh, [fingerprint]);
 
   const news = analystPanel(state, statuses, "news_analyst");
   const fundamentals = analystPanel(state, statuses, "fundamentals_analyst");
@@ -76,7 +105,7 @@ export function Cockpit({
               {topology.nodes.length} nodes · debate {mode}
             </span>
           </div>
-          <CostTicker state={state} />
+          <CostTicker state={state} replayElapsedMs={replayElapsedMs} />
         </div>
 
         <PipelineCanvas topology={topology} statuses={statuses} />
@@ -84,7 +113,7 @@ export function Cockpit({
         {/* The ONE polite live region. It must stay a direct child of the
             section — inside the collapsed <details> below it would be removed
             from the a11y tree and every announcement muted. */}
-        <StatusAnnouncer state={state} />
+        <StatusAnnouncer state={state} isReplay={isReplay} />
 
         {/* The aria-hidden canvas is shadowed by this semantic status spine:
             the per-node list is a textual transcript, collapsed so it
@@ -97,7 +126,7 @@ export function Cockpit({
               Status transcript · {state.order.length} nodes
             </summary>
             <div className="px-3.5 pb-3.5">
-              <LiveFeed state={state} />
+              <LiveFeed state={state} replayLatencies={replayNodeLatencies} />
             </div>
           </details>
         )}
@@ -116,4 +145,4 @@ export function Cockpit({
       {showReveal && <DecisionReveal done={state.done!} ticker={state.ticker} />}
     </div>
   );
-}
+});

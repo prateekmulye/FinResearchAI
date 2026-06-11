@@ -71,7 +71,11 @@ class ReportPayload(BaseModel):
 
 
 def aggregate_metrics(run_metrics: list[dict] | None) -> dict:
-    """Sum per-node metric records into run totals. Tolerant of missing keys."""
+    """Sum per-node metric records into run totals. Tolerant of missing keys.
+
+    ``node_count`` counts DISTINCT node labels: debate sub-turn records all share
+    one label (research_debate/risk_debate), so raw record count would inflate
+    'Nodes executed' with per-LLM-call lines."""
     records = run_metrics or []
     prompt = sum(int(r.get("prompt_tokens", 0) or 0) for r in records)
     completion = sum(int(r.get("completion_tokens", 0) or 0) for r in records)
@@ -83,13 +87,16 @@ def aggregate_metrics(run_metrics: list[dict] | None) -> dict:
         "total_tokens": prompt + completion,
         "latency_s": round(latency, 4),
         "cost_usd": round(cost, 6),
-        "node_count": len(records),
+        "node_count": len({r.get("node") for r in records}),
     }
 
 
-def render_metrics_footer(run_metrics: list[dict] | None, debate_mode: str) -> str:
+def render_metrics_footer(
+    run_metrics: list[dict] | None, debate_mode: str, *, cache_hit: bool = False
+) -> str:
     """Render the transparent cost/observability footer from run_metrics."""
     agg = aggregate_metrics(run_metrics)
+    cache_row = "| Served from verdict cache | yes |\n" if cache_hit else ""
     return (
         "\n---\n\n"
         "### Run Transparency\n\n"
@@ -101,6 +108,7 @@ def render_metrics_footer(run_metrics: list[dict] | None, debate_mode: str) -> s
         f"{agg['prompt_tokens']} / {agg['completion_tokens']} / {agg['total_tokens']} |\n"
         f"| Nodes executed | {agg['node_count']} |\n"
         f"| Debate mode | {debate_mode} |\n"
+        f"{cache_row}"
         "\n_Costs and latency are measured per-node via CostTracker callbacks "
         "and aggregated here for full transparency._\n"
     )
@@ -253,18 +261,60 @@ def _minimal_fallback_report(
     }
 
 
+def _cached_verdict_report(state: dict, debate_mode: str) -> dict:
+    """Render the cache-hit short-circuit report deterministically — no LLM call.
+
+    The router found a fresh cached FinalDecision and the graph skipped straight
+    to the reporter, so there are no analyst reports to narrate. The verdict
+    header is rendered from the cached decision and the body says so."""
+    header = render_verdict_header(
+        ticker=state.get("ticker", ""),
+        resolved_ticker=state.get("resolved_ticker", ""),
+        investor_mode=state.get("investor_mode", "Neutral"),
+        final_decision=state.get("final_decision", {}),
+        trade_proposal={},  # no trader ran on the short-circuit path
+    )
+    body = (
+        "## Report\n\n"
+        "_This verdict was served from the verdict cache: a recent prior analysis "
+        "of this ticker produced the decision above, so the full analyst pipeline "
+        "was skipped. Re-run after the cache expires for a fresh analysis._\n"
+    )
+    this_node_metrics = zero_metrics("reporter")
+    all_metrics = list(state.get("run_metrics", [])) + this_node_metrics
+    footer = render_metrics_footer(all_metrics, debate_mode=debate_mode, cache_hit=True)
+    fd_default = FinancialData(
+        valuation=50.0, growth=50.0, profitability=50.0,
+        momentum=50.0, sentiment=50.0, risk=50.0,
+    )
+    return {
+        "final_report": f"{header}\n{body}\n{footer}",
+        "financial_data": fd_default.model_dump(),
+        "run_metrics": this_node_metrics,
+    }
+
+
 # ---------------------------------------------------------------------------
 # The async reporter node
 # ---------------------------------------------------------------------------
 
 
-async def reporter(state: dict) -> dict:
+async def reporter(state: dict, *, debate_mode: str | None = None) -> dict:
     """Terminal node: assemble the markdown report + financial_data from typed state.
 
     Reads analyst_reports, research_debate, trade_proposal, risk_debate,
-    final_decision, run_metrics. Writes final_report, financial_data, run_metrics."""
+    final_decision, run_metrics. Writes final_report, financial_data, run_metrics.
+
+    ``debate_mode`` is bound per-run by build_graph (the mode the graph was
+    actually compiled with); the settings default is only a fallback for direct
+    calls so the footer never reports a mode the run didn't use."""
     tracker = CostTracker("reporter")
-    debate_mode = getattr(get_settings(), "debate_mode", "on")
+    if debate_mode is None:
+        debate_mode = getattr(get_settings(), "debate_mode", "on")
+
+    if (state.get("model_plan") or {}).get("cache_hit"):
+        # Verdict-cache short-circuit (router -> reporter): render deterministically.
+        return _cached_verdict_report(state, debate_mode)
 
     try:
         llm = get_llm("quick").with_structured_output(ReportPayload, method=STRUCT_METHOD)

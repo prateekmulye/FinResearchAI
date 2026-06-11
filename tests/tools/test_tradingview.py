@@ -28,6 +28,37 @@ def test_fetch_technicals_maps_fields(monkeypatch):
     assert d["sell_signals"] == 7
 
 
+@pytest.mark.parametrize(
+    ("ticker", "screener", "exchange", "expected_symbol"),
+    [
+        ("AAPL", "america", "NASDAQ", "AAPL"),        # US: untouched
+        ("RELIANCE.NS", "india", "NSE", "RELIANCE"),  # NSE suffix stripped
+        ("RELIANCE.BO", "india", "BSE", "RELIANCE"),  # BSE suffix stripped
+        ("7203.T", "japan", "TSE", "7203"),           # TSE suffix stripped
+        ("600519.SS", "china", "SSE", "600519"),      # SSE suffix stripped
+        ("000001.SZ", "china", "SZSE", "000001"),     # SZSE: suffix stripped, zeros KEPT
+        ("0700.HK", "hongkong", "HKEX", "700"),       # HK: suffix + leading zeros dropped
+        ("0005.HK", "hongkong", "HKEX", "5"),
+    ],
+)
+def test_fetch_technicals_strips_yfinance_suffix_for_ta_symbol(
+    monkeypatch, ticker, screener, exchange, expected_symbol
+):
+    """tradingview_ta wants EXCHANGE:SYMBOL without the yfinance suffix (and HK
+    symbols without leading zeros); the tool owns that munging."""
+    captured = {}
+
+    def _analyze(*, symbol, screener, exchange, **kw):
+        captured["symbol"] = symbol
+        return _fake_analysis()
+
+    monkeypatch.setattr(tv, "_analyze", _analyze)
+    t = tv.fetch_technicals(ticker, screener=screener, exchange=exchange)
+    assert captured["symbol"] == expected_symbol
+    # The caller-facing ticker is preserved un-munged in the result.
+    assert t.ticker == ticker
+
+
 def test_fetch_technicals_exchange_fallback(monkeypatch):
     calls = []
 

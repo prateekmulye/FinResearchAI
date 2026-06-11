@@ -28,12 +28,18 @@ function ScoreCountUp({ score }: { score: number }) {
       <span className="font-mono text-2xs uppercase tracking-[0.18em] text-[var(--color-fg-subtle)]">
         Outlook score
       </span>
-      <span className="flex items-baseline gap-0.5">
+      {/* Screen readers hear the FINAL value once; the rAF count-up below is
+          decorative and aria-hidden — a live region on a per-frame textContent
+          mutation would announce dozens of intermediate numbers. */}
+      <span className="sr-only" aria-live="polite">
+        {score}
+        /100
+      </span>
+      <span className="flex items-baseline gap-0.5" aria-hidden="true">
         <span
           ref={ref}
           className="font-mono text-4xl font-semibold tabular-nums text-[var(--color-fg)]"
           style={{ willChange: "contents" }}
-          aria-live="polite"
         >
           0
         </span>

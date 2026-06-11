@@ -71,6 +71,31 @@ def test_aggregate_reports_spread():
     assert agg["score_delta_stdev"] == 10.0
 
 
+def test_aggregate_includes_judge_cost():
+    """The judge's own LLM spend is part of the eval's honest cost accounting."""
+    pairs, verdicts = _fixture()
+    agg = aggregate(pairs, verdicts)
+    assert agg["judge_cost_usd"] == 0.0  # defaults when no totals supplied
+    assert agg["judge_tokens"] == 0
+
+    judge_totals = {"prompt_tokens": 100, "completion_tokens": 50,
+                    "latency_s": 1.0, "cost_usd": 0.123456, "per_node": []}
+    agg2 = aggregate(pairs, verdicts, judge_totals=judge_totals)
+    assert agg2["judge_cost_usd"] == 0.123456
+    assert agg2["judge_tokens"] == 150
+
+
+def test_render_markdown_includes_judge_cost_row():
+    pairs, verdicts = _fixture()
+    judge_totals = {"prompt_tokens": 80, "completion_tokens": 20,
+                    "latency_s": 1.0, "cost_usd": 0.05, "per_node": []}
+    md = render_markdown(aggregate(pairs, verdicts, judge_totals=judge_totals),
+                         pairs, verdicts, label="demo")
+    assert "Judge cost" in md
+    assert "0.05" in md
+    assert "100" in md  # judge tokens
+
+
 def test_render_markdown_includes_proxy_disclaimer():
     pairs, verdicts = _fixture()
     md = render_markdown(aggregate(pairs, verdicts), pairs, verdicts, label="demo")

@@ -108,6 +108,11 @@ function Row({ pair }: { pair: EvalPair }) {
         >
           {pair.actionsAgree ? "→" : "≠"}
         </span>
+        {/* The glyph is aria-hidden and a title isn't reliably exposed — the
+            agree/diverge judgement must also exist as text. */}
+        <span className="sr-only">
+          {pair.actionsAgree ? "verdicts agree" : "verdicts diverge"}
+        </span>
         <Verdict action={pair.actionOff} score={pair.scoreOff} muted />
       </div>
 

@@ -3,13 +3,12 @@
 DEVIATION FROM PLAN: The installed SDK exposes V1FirecrawlApp (not Firecrawl).
 - search(query, limit=...) returns a response whose .data is a list of dicts
   with keys {url, title, description, markdown} — NOT .web list of objects.
-- scrape_url(url, formats=[...]) is the scrape method (not .scrape()).
 
 search_news(query, limit) -> list[NewsHit]   (v1 search, data field)
-scrape_article(url)        -> Article         (v1 scrape_url, markdown field)
 
-Both surface failures as ToolError (no silent except). Blocking I/O — callers
-wrap with `await asyncio.to_thread(...)`.
+Failures surface as ToolError (no silent except). Blocking I/O — callers wrap
+with `await asyncio.to_thread(...)`. The unused scrape_article/Article pair was
+removed in the WP-14 sweep (no callers).
 """
 from __future__ import annotations
 
@@ -27,12 +26,6 @@ class NewsHit:
     url: str
     snippet: str
     markdown: str | None  # populated only when search scraped full content
-
-
-@dataclass
-class Article:
-    url: str
-    markdown: str
 
 
 def _get(item: Any, key: str, default: Any = None) -> Any:
@@ -82,15 +75,3 @@ def search_news(query: str, limit: int = 5) -> list[NewsHit]:
             )
         )
     return hits
-
-
-def scrape_article(url: str) -> Article:
-    try:
-        doc = _client().scrape_url(url, formats=["markdown"])
-    except Exception as exc:
-        raise ToolError("firecrawl", f"scrape failed for {url}: {exc}") from exc
-
-    markdown = _get(doc, "markdown") or ""
-    if not markdown:
-        raise ToolError("firecrawl", f"scrape returned empty markdown for {url}")
-    return Article(url=url, markdown=markdown)

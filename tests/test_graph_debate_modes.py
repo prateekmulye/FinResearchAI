@@ -373,6 +373,30 @@ def test_build_graph_defaults_to_settings():
 
 
 @pytest.mark.asyncio
+async def test_reporter_footer_reflects_built_mode_not_settings(offline_graph):
+    """The footer must report the mode the graph was BUILT with (per-run), not the
+    settings default: settings default is 'on', so an off-graph saying 'off' proves
+    the binding."""
+    from src.graph import build_graph
+
+    out = await build_graph("off").ainvoke({"ticker": "AAPL", "investor_mode": "Neutral"})
+    assert "| Debate mode | off |" in out["final_report"]
+
+
+def test_route_after_router_cache_hit_goes_to_reporter():
+    """The router's conditional edge: cache_hit -> reporter, else analyst fan-out."""
+    from src.graph import _route_after_router
+
+    assert _route_after_router({"model_plan": {"cache_hit": True}}) == "reporter"
+    assert set(_route_after_router({"model_plan": {}})) == {
+        "news_analyst", "fundamentals_analyst", "technicals_analyst",
+    }
+    assert set(_route_after_router({})) == {
+        "news_analyst", "fundamentals_analyst", "technicals_analyst",
+    }
+
+
+@pytest.mark.asyncio
 async def test_debate_mode_on_has_12_nodes(monkeypatch):
     scripted = [
         DebateTurn(role="bull", round=1, argument="bull opening"),

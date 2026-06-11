@@ -394,9 +394,9 @@ async def record_run_finish(
     """Finalize the `runs` row. True iff the row existed and was updated.
 
     Status vocabulary: "finished" (done, with payload), "error" (error event,
-    no payload), "aborted" (client disconnected before done/error). Only
-    "finished" runs are honored by ``repos.latest_finished_run`` — verdict-cache
-    semantics are preserved.
+    no payload), "aborted" (client disconnected before done/error). The verdict
+    cache is a separate concern: it reads the ``verdicts`` table via
+    ``repos.latest_verdict`` (newest-by-ts), not the runs rows written here.
 
     WP-9: "finished" runs WITH a report also get a summary embedding (leading
     report chars + decision action/rationale) into ``runs.embedding`` for

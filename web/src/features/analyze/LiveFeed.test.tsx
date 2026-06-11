@@ -67,4 +67,43 @@ describe("LiveFeed — visual transcript only", () => {
     expect(rows[0]).toHaveTextContent(/router/i);
     expect(rows[1]).toHaveTextContent(/streaming/i);
   });
+
+  it("post-abort (phase idle): incomplete rows say 'stopped', never 'streaming'", () => {
+    const state = makeState({
+      phase: "idle", // a user Stop lands here with the node map intact
+      order: ["router", "news_analyst"],
+      nodes: {
+        router: makeNode("router", { completedAt: 2000 }),
+        news_analyst: makeNode("news_analyst", { text: "mid-flight" }),
+      },
+    });
+    render(<LiveFeed state={state} />);
+    expect(screen.queryByText(/streaming/i)).not.toBeInTheDocument();
+    expect(screen.getByText("stopped")).toBeInTheDocument();
+  });
+});
+
+describe("LiveFeed — replay latencies", () => {
+  it("reads recorded per-node latencies instead of synthetic fold-tick stamps", () => {
+    // Replay reducer stamps are fold ticks (1, 2, 3…): subtracting them
+    // rendered fake "1ms" rows. With replayLatencies provided, the row shows
+    // the recorded run's own latency.
+    const state = makeState({
+      order: ["router"],
+      nodes: { router: makeNode("router", { startedAt: 1, completedAt: 2 }) },
+    });
+    render(<LiveFeed state={state} replayLatencies={{ router: 1.7 }} />);
+    expect(screen.getByText("1.7s")).toBeInTheDocument();
+    expect(screen.queryByText("1ms")).not.toBeInTheDocument();
+  });
+
+  it("shows no fabricated latency for a node the recorded map doesn't know", () => {
+    const state = makeState({
+      order: ["router"],
+      nodes: { router: makeNode("router", { startedAt: 1, completedAt: 2 }) },
+    });
+    render(<LiveFeed state={state} replayLatencies={{}} />);
+    expect(screen.queryByText("1ms")).not.toBeInTheDocument();
+    expect(screen.getByText("—")).toBeInTheDocument();
+  });
 });

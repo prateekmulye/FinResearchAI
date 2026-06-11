@@ -31,10 +31,12 @@ drawers. Keeps a recruiter oriented; rewards the engineer who digs.
 
 ---
 
-## 2. Color — OKLCH, AAA on data
+## 2. Color — OKLCH, AAA on primary data
 
 OKLCH so the luminous signal glow stays perceptually uniform across blurred glass
-layers. Maintain **7:1 (AAA)** contrast on data strings to prevent halation.
+layers. Contrast targets, honestly stated: **7:1 (AAA)** on primary data values
+(`--color-fg`, >12:1 on base) to prevent halation; secondary/subtle data text
+(`--color-fg-muted`, `--color-fg-subtle` ≈ 4.7:1) meets **4.5:1 (AA)**, not AAA.
 
 ### Surfaces (asphalt blue-black, 4-step elevation)
 
@@ -187,4 +189,4 @@ Analyze feature: `AnalyzeForm`, `LiveFeed`, `nodeLabels`.
 4. Mono uppercase kicker introduces terminal sections.
 5. New live surfaces fire the luminous-accent flash on data arrival and ship a
    parallel `aria-live` semantic log (the canvas, when added, is `aria-hidden`).
-6. Respect the focus-visible azure ring; AA contrast minimum, AAA on data strings.
+6. Respect the focus-visible azure ring; AA contrast minimum everywhere, AAA on primary data values (secondary/subtle data text is AA — see §2).

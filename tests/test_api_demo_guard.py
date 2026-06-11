@@ -1,6 +1,6 @@
 # tests/test_api_demo_guard.py
 """WP-5 demo guard: daily per-IP/global live-run caps on POST /api/analyze,
-layered ON TOP of the per-minute limiter, with an X-Admin-Token bypass for
+layered ON TOP of the per-hour burst limiter, with an X-Admin-Token bypass for
 BOTH, plus the GET /api/quota status endpoint.
 
 Design under test (see src/api/demo_guard.py): increment-FIRST for the IP
@@ -156,7 +156,7 @@ def test_invalid_body_does_not_consume_quota(guarded_app):
 
 def test_admin_token_bypasses_daily_caps_and_minute_limiter(guarded_app):
     make_client, seed = guarded_app
-    # rate_limit=0: the per-minute limiter rejects EVERYTHING without the bypass.
+    # rate_limit=0: the per-hour burst limiter rejects EVERYTHING without the bypass.
     with make_client(ip_cap=0, global_cap=0, admin_token="s3cr3t", rate_limit=0) as client:
         denied = client.post("/api/analyze", json=BODY)
         allowed = client.post(
@@ -228,13 +228,13 @@ def test_guard_fails_open_when_quota_db_is_broken(guarded_app, monkeypatch, capl
 
 
 def test_guard_noops_when_warehouse_disabled(offline_graph, monkeypatch):
-    # env_isolation scrubs DATABASE_URL; only the per-minute limiter applies.
+    # env_isolation scrubs DATABASE_URL; only the per-hour burst limiter applies.
     monkeypatch.setenv("DEMO_RUNS_PER_IP_PER_DAY", "0")
     settings_mod.get_settings.cache_clear()
     with TestClient(create_app(rate_limit=2)) as client:
         assert client.post("/api/analyze", json=BODY).status_code == 200
         assert client.post("/api/analyze", json=BODY).status_code == 200
-        assert client.post("/api/analyze", json=BODY).status_code == 429  # minute limiter
+        assert client.post("/api/analyze", json=BODY).status_code == 429  # burst limiter
 
 
 # ------------------------------------------------------------------ /api/quota
@@ -247,7 +247,7 @@ def test_quota_endpoint_reflects_usage(guarded_app):
         client.post("/api/analyze", json=BODY)
         after = client.get("/api/quota").json()
     assert before == {
-        "metered": True,
+        "metered": True, "degraded": False,
         "ip_used": 0, "ip_limit": 3, "global_used": 0, "global_limit": 25,
         "admin": False,
     }
@@ -277,9 +277,35 @@ def test_quota_endpoint_unmetered_when_warehouse_disabled(monkeypatch):
         admin = client.get("/api/quota", headers={"X-Admin-Token": "s3cr3t"})
     assert anon.status_code == 200
     assert anon.json() == {
-        "metered": False,
+        "metered": False, "degraded": False,
         "ip_used": None, "ip_limit": None, "global_used": None, "global_limit": None,
         "admin": False,
     }
     assert admin.json()["metered"] is False
     assert admin.json()["admin"] is True
+
+
+def test_quota_endpoint_degrades_to_200_on_db_outage(guarded_app, monkeypatch, caplog):
+    # A DB outage is NOT "unmetered": respond 200 with metered=true,
+    # degraded=true and null counters (never a 500) so the UI can tell
+    # "quota system down" apart from "no quota system at all".
+    from src.warehouse import db as db_mod
+
+    make_client, _ = guarded_app
+    with make_client(admin_token="s3cr3t") as client:
+        def _boom():
+            raise RuntimeError("db down")
+
+        monkeypatch.setattr(db_mod, "get_sessionmaker", _boom)
+        with caplog.at_level(logging.WARNING, logger="src.api.routes.quota"):
+            anon = client.get("/api/quota")
+            admin = client.get("/api/quota", headers={"X-Admin-Token": "s3cr3t"})
+    assert anon.status_code == 200
+    assert anon.json() == {
+        "metered": True, "degraded": True,
+        "ip_used": None, "ip_limit": None, "global_used": None, "global_limit": None,
+        "admin": False,
+    }
+    assert admin.json()["degraded"] is True
+    assert admin.json()["admin"] is True  # admin detection survives the outage
+    assert "degrad" in caplog.text
